@@ -16,7 +16,7 @@ ParameterData = DataFactory('parameter')
 Int = DataFactory('int')
 
 
-class PartialWorkChain(WorkChain):
+class PartialOccupancyWorkChain(WorkChain):
     __k_b = 8.61733e-5
 
     @classmethod
