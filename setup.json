@@ -1,0 +1,41 @@
+{
+    "author": "Matthieu Mottet, Tobias Binninger, Aris Marcolongo",
+    "author_email": "ttt@zurich.ibm.com, tbi@zurich.ibm.com, isr@zurich.ibm.com",
+    "classifiers": [
+        "License :: OSI Approved :: MIT License", 
+        "Programming Language :: Python :: 2.7", 
+        "Development Status :: 0 - Alpha"
+    ], 
+    "description": "IBM toolbox for AiiDA.",
+    "entry_points": {
+        "aiida.calculations": [
+            "zrl.fitter = aiida_zrl_toolbox.fitter.calculations.fitter:FitterCalculation"
+        ],
+        "aiida.parsers": [
+            "zrl.fitter = aiida_zrl_toolbox.fitter.parsers.fitter:FitterParser"
+        ],
+        "aiida.data": [
+            "zrl.fitter.potential = aiida_zrl_toolbox.fitter.data.potential:PotentialData"
+        ],
+        "aiida.workflows": [
+            "zrl.utils.replicate = aiida_zrl_toolbox.utils.workflows.replicate:ReplicateWorkChain",
+            "zrl.utils.shake = aiida_zrl_toolbox.utils.workflows.shake:ShakeWorkChain",
+            "zrl.utils.partial = aiida_zrl_toolbox.utils.workflows.partial:PartialWorkChain",
+            "zrl.fitter = aiida_zrl_toolbox.fitter.workflows.fitter:FitterWorkChain"
+        ]
+    }, 
+    "extras_require": {
+        "dev_precommit": [
+            "pre-commit"
+        ], 
+        "docs": [
+        ]
+    }, 
+    "install_requires": [
+        "aiida_core[atomic_tools]>=0.11.4"
+    ], 
+    "license": "MIT License", 
+    "name": "aiida_ibm_toolbox",
+    "url": "",
+    "version": "0.1.0"
+}
