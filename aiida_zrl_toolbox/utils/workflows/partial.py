@@ -33,11 +33,13 @@ class PartialOccupancyWorkChain(WorkChain):
         )
 
         spec.output_namespace('structures', valid_type=StructureData, dynamic=True)
+        spec.output('seed', valid_type=Int)
 
     def validate_inputs(self):
         parameter_dict = self.inputs.parameters.get_dict()
 
         self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**32 - 1))
+        self.out('seed', self.ctx.seed)
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
 
         self.ctx.charges = {
