@@ -6,7 +6,7 @@
         "Programming Language :: Python :: 2.7", 
         "Development Status :: 0 - Alpha"
     ], 
-    "description": "IBM toolbox for AiiDA.",
+    "description": "Toolbox for AiiDA developped at the IBM ZRL.",
     "entry_points": {
         "aiida.calculations": [
             "zrl.fitter = aiida_zrl_toolbox.fitter.calculations.fitter:FitterCalculation"
@@ -32,7 +32,7 @@
         ]
     }, 
     "install_requires": [
-        "aiida_core[atomic_tools]>=0.11.4"
+        "aiida_core[atomic_tools]>=0.12.2"
     ], 
     "license": "MIT License", 
     "name": "zrl_aiida_toolbox",
