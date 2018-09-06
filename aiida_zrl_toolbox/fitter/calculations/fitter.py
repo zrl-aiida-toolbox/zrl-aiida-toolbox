@@ -151,7 +151,7 @@ class FitterCalculation(JobCalculation):
                 'restart': {
                     'file': 'aiida.restart',
                     'save_only': True,
-                    'frequency': 1
+                    'frequency': parameters.get('restart', {}).get('frequency', 10)
                 },
                 'max_steps': parameters.get('max_steps', 100),
                 'step_size': parameters.get('step_size', 1e-3)
