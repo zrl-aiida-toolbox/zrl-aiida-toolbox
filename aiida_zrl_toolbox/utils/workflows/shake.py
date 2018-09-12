@@ -22,6 +22,7 @@ class ShakeWorkChain(WorkChain):
             cls.shake
         )
 
+        spec.output('seed', valid_type=Int)
         spec.output_namespace('structures', valid_type=StructureData, dynamic=True)
 
     def validate_inputs(self):
@@ -30,11 +31,12 @@ class ShakeWorkChain(WorkChain):
         self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**32 - 1))
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
 
-        self.ctx.stdev_atms = float(parameter_dict.get('stdev_atms', 0.01))
+        self.ctx.stdev_atms = float(parameter_dict.get('stdev_atms', 0))
         self.ctx.stdev_cell = float(parameter_dict.get('stdev_cell', 0))
         self.ctx.n = int(parameter_dict.get('n', 1))
 
         self.ctx.structure = self.inputs.structure.get_pymatgen()
+        self.out('seed', self.ctx.seed)
 
     def __with_noise(self):
         new = self.ctx.structure.copy()

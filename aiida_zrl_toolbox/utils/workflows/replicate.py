@@ -33,20 +33,27 @@ class ReplicateWorkChain(WorkChain):
         self.ctx.val_electrons = {
             key: int(value) for key, value in parameter_dict.get('val_electrons', {}).items()
         }
+        self.ctx.max_volume = float(parameter_dict.get('max_volume')) if 'max_volume' in parameter_dict else None
         self.ctx.structure = self.inputs.structure.get_pymatgen()
 
-        assert self.ctx.a and self.ctx.b and self.ctx.c or (self.ctx.max_electrons and len(self.ctx.val_electrons)), \
+        assert self.ctx.a and self.ctx.b and self.ctx.c \
+               or (self.ctx.max_electrons and len(self.ctx.val_electrons)) \
+               or self.ctx.max_volume, \
             'You must either provide values for `a`, `b` and `c` or for `max_electrons` in the parameters dictionary.'
 
     def abc_not_defined(self):
         return self.ctx.a is None and self.ctx.b is None and self.ctx.c is None
 
     def calculate_factors(self):
-        electrons = np.floor(sum(n * self.ctx.val_electrons.get(symbol)
-                                 for symbol, n in self.ctx.structure.composition.as_dict().items()))
         volume = self.ctx.structure.volume
 
-        max_volume = volume * self.ctx.max_electrons / electrons
+        if self.ctx.max_electrons:
+            electrons = np.floor(sum(n * self.ctx.val_electrons.get(symbol)
+                                     for symbol, n in self.ctx.structure.composition.as_dict().items()))
+            max_volume = volume * self.ctx.max_electrons / electrons
+        else:
+            max_volume = self.ctx.max_volume
+
         max_edge = np.power(max_volume, 1. / 3)
         replicas = np.floor(max_edge / np.diag(self.ctx.structure.lattice.matrix)).astype(int)
         replicas[np.where(replicas == 0)] = 1
