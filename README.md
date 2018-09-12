@@ -14,9 +14,13 @@ pip install git+https://github.com/zrl-aiida-toolbox/zrl-aiida-toolbox.git#egg=z
 
 ## Workchains
 
+- [zrl.utils.replicate](#zrl-utils-replicate)
+- [zrl.utils.partial_occ](#zrl-utils-partial_occ)
+- [zrl.utils.shake](#zrl-utils-shake)
+
 ### Utils
 
-#### zrl.utils.replicate
+#### <a name="zrl-utils-replicate"></a>zrl.utils.replicate
 
 This workchain creates a supercell based on the provided criteria. Currently supported 
 criteria are, in order of precedence, explicit supercell size, maximum number of electrons 
@@ -36,7 +40,7 @@ The `parameters` input expects the following parameters:
 - max_electrons `int`: maximum number of valence electrons requested
 - max_volume `float`: maximum volume requested.
 
-#### zrl.utils.partial_occ
+#### <a name="zrl-utils-partial_occ"></a>zrl.utils.partial_occ
 
 This workchain converts a structure containing partial occupancies into realisations of these
 partial occupancies respecting the fractional occupancies of the sites. The returned 
@@ -61,7 +65,7 @@ The `parameters` input expects the following parameters:
 - max_configurations `int`: the maximum number of realizations to return. The workchain will
   always return at most the `max_configurations`-last generated structures.
 
-#### zrl.utils.shake
+#### <a name="zrl-utils-shake"></a>zrl.utils.shake
 
 This workchain adds a normal noise on the atomic positions and/or the lattice vectors.
 
