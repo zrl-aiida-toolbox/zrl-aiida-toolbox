@@ -21,38 +21,38 @@ pip install git+https://github.com/zrl-aiida-toolbox/zrl-aiida-toolbox.git@dev#e
 
 ### PotentialData (*zrl.fitter.potential*)
 
-####`pair_type` *get/set* `str` 
+#### `pair_type` *get/set* `str` 
 Stores the type of short range pair potential.
 
-####`bond_type` *get/set* `str` 
+#### `bond_type` *get/set* `str` 
 Stores the type of the bond potential.
 
-####`unit_charge` *get/set* `float` 
+#### `unit_charge` *get/set* `float` 
 Stores the unit charge.
 
-####`charges` *get/set* `{str: float}`
+#### `charges` *get/set* `{str: float}`
 Stores for each element, the valence charges (atom charge = unit charge * valence charge).
 
-####`pairs` *get*
+#### `pairs` *get*
 Tuple of dictionary containing the parameters of the pairs. The content of the dictionary 
 will change based on the pair potential type, `pair_type`.
 
-####`bonds` *get*
+#### `bonds` *get*
 Tuple of dictionary containing the parameters of the bonds. The content of the dictionary 
 will change based on the bond potential type, `bond_type`.
 
-####`set_pair(kind_1, kind_2, **kwargs)`
+#### `set_pair(kind_1, kind_2, **kwargs)`
 Add a pair to the force field between elements `kind_1` and `kind_2` with parameters `**kwargs`.
 The parameters will vary based on your `pair_type`.
 
-####`delete_pair(kind_1, kind_2)`
+#### `delete_pair(kind_1, kind_2)`
 Delete the pair between `kind_1` and `kind_2`.
 
-####`set_bond(kind_1, kind_2, **kwargs)`
+#### `set_bond(kind_1, kind_2, **kwargs)`
 Add a bond to the force field between elements `kind_1` and `kind_2` with parameters `**kwargs`.
 The parameters will vary based on your `bond_type`.
 
-####`delete_bond(kind_1, kind_2)`
+#### `delete_bond(kind_1, kind_2)`
 Delete the bond between `kind_1` and `kind_2`.
 
 
