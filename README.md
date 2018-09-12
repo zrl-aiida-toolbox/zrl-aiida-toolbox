@@ -19,40 +19,40 @@ pip install git+https://github.com/zrl-aiida-toolbox/zrl-aiida-toolbox.git@dev#e
 
 ## <a name="data-types"></a>Data types
 
-#### PotentialData (*zrl.fitter.potential*)
+### PotentialData (*zrl.fitter.potential*)
 
-#####`pair_type` *get/set* `str` 
+####`pair_type` *get/set* `str` 
 Stores the type of short range pair potential.
 
-#####`bond_type` *get/set* `str` 
+####`bond_type` *get/set* `str` 
 Stores the type of the bond potential.
 
-#####`unit_charge` *get/set* `float` 
+####`unit_charge` *get/set* `float` 
 Stores the unit charge.
 
-#####`charges` *get/set* `{str: float}`
+####`charges` *get/set* `{str: float}`
 Stores for each element, the valence charges (atom charge = unit charge * valence charge).
 
-#####`pairs` *get*
+####`pairs` *get*
 Tuple of dictionary containing the parameters of the pairs. The content of the dictionary 
 will change based on the pair potential type, `pair_type`.
 
-#####`bonds` *get*
+####`bonds` *get*
 Tuple of dictionary containing the parameters of the bonds. The content of the dictionary 
 will change based on the bond potential type, `bond_type`.
 
-#####`set_pair(kind_1, kind_2, **kwargs)`
+####`set_pair(kind_1, kind_2, **kwargs)`
 Add a pair to the force field between elements `kind_1` and `kind_2` with parameters `**kwargs`.
 The parameters will vary based on your `pair_type`.
 
-#####`delete_pair(kind_1, kind_2)`
+####`delete_pair(kind_1, kind_2)`
 Delete the pair between `kind_1` and `kind_2`.
 
-#####`set_bond(kind_1, kind_2, **kwargs)`
+####`set_bond(kind_1, kind_2, **kwargs)`
 Add a bond to the force field between elements `kind_1` and `kind_2` with parameters `**kwargs`.
 The parameters will vary based on your `bond_type`.
 
-#####`delete_bond(kind_1, kind_2)`
+####`delete_bond(kind_1, kind_2)`
 Delete the bond between `kind_1` and `kind_2`.
 
 
@@ -64,7 +64,7 @@ Delete the bond between `kind_1` and `kind_2`.
 
 - [zrl.fitter](#zrl-fitter-workchain)
 
-#### <a name="zrl-utils-replicate"></a>ReplicateWorkChain (*zrl.utils.replicate*)
+### <a name="zrl-utils-replicate"></a>ReplicateWorkChain (*zrl.utils.replicate*)
 
 This workchain creates a supercell based on the provided criteria. Currently supported 
 criteria are, in order of precedence, explicit supercell size, maximum number of electrons 
@@ -84,7 +84,7 @@ The `parameters` input expects the following parameters:
 - max_electrons `int`: maximum number of valence electrons requested
 - max_volume `float`: maximum volume requested.
 
-#### <a name="zrl-utils-partial_occ"></a>PartialOccupancyWorkChain (*zrl.utils.partial_occ*)
+### <a name="zrl-utils-partial_occ"></a>PartialOccupancyWorkChain (*zrl.utils.partial_occ*)
 
 This workchain converts a structure containing partial occupancies into realisations of these
 partial occupancies respecting the fractional occupancies of the sites. The returned 
@@ -109,7 +109,7 @@ The `parameters` input expects the following parameters:
 - max_configurations `int`: the maximum number of realizations to return. The workchain will
   always return at most the `max_configurations`-last generated structures.
 
-#### <a name="zrl-utils-shake"></a>ShakeWorkChain (*zrl.utils.shake*)
+### <a name="zrl-utils-shake"></a>ShakeWorkChain (*zrl.utils.shake*)
 
 This workchain adds a normal noise on the atomic positions and/or the lattice vectors.
 
@@ -130,4 +130,4 @@ The `parameters` input expects the following parameters:
   positions. 
 - n `int`:  number of structures to generate.
 
-#### <a name="zrl-fitter-workchain"></a>FitterWorkChain (*zrl.fitter*)
+### <a name="zrl-fitter-workchain"></a>FitterWorkChain (*zrl.fitter*)
