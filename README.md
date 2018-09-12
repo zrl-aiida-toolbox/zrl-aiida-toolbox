@@ -16,6 +16,7 @@ pip install git+https://github.com/zrl-aiida-toolbox/zrl-aiida-toolbox.git@dev#e
 
 - [Data types](#data-types)
 - [Workchains](#workchains)
+- [Calculations](#calculations)
 
 ## <a name="data-types"></a>Data types
 
@@ -131,3 +132,23 @@ The `parameters` input expects the following parameters:
 - n `int`:  number of structures to generate.
 
 ### <a name="zrl-fitter-workchain"></a>FitterWorkChain (*zrl.fitter*)
+
+## Calculations
+
+- [FitterCalculation](#zrl-fitter-calculation)
+
+### <a name="zrl-fitter-calculation"></a>FitterCalculation (*zrl.fitter*)
+
+**Inputs**
+- structures: `{uuid: StructureData}`
+- force_field: `PotentialData`
+- bounds: `{str: (float, float)}`
+- forces: `{uuid: ArrayData}`
+- stress: `{uuid: ParameterData}`
+- energy: `{uuid: energy}`
+- parameters: `ParameterData`
+- weights: `ParameterData`
+
+**Outputs**
+- force_field: `PotentialData`
+- cost: `ArrayData`
