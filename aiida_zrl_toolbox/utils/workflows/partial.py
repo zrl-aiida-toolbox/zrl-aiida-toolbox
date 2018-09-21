@@ -110,10 +110,9 @@ class PartialOccupancyWorkChain(WorkChain):
                         energy, swapped = self.__swap(specie, T=1800)
                         if swapped:
                             swaps[-1] += 1
-                            start = - (self.ctx.max_configurations - 1) \
-                                if len(sites) > self.ctx.max_configurations \
-                                else 0
-                            sites = sites[start:] + [deepcopy(self.ctx.sites)]
+                            sites = (sites[- (self.ctx.max_configurations - 1):]
+                                     if self.ctx.max_configurations > 1
+                                     else []) + [deepcopy(self.ctx.sites)]
                         self.ctx.energy.append(energy)
                 if sum(swaps[-10:]) == 0:
                     break
