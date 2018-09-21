@@ -16,13 +16,16 @@ class FitterWorkChain(WorkChain):
     @classmethod
     def define(cls, spec):
         super(WorkChain, cls).define(spec)
-        spec.input('force_field', valid_type=PotentialData)
         spec.input('parameters', valid_type=ParameterData)
 
         spec.input_namespace('structures', valid_type=StructureData, dynamic=True)
-        spec.input_namespace('forces', valid_type=ArrayData, dynamic=True)
-        spec.input_namespace('energy', valid_type=ParameterData, dynamic=True)
-        spec.input_namespace('stress', valid_type=ParameterData, dynamic=True)
+        spec.input_namespace('structures.forces', valid_type=ArrayData, dynamic=True)
+        spec.input_namespace('structures.energy', valid_type=ParameterData, dynamic=True)
+        spec.input_namespace('structures.stress', valid_type=ParameterData, dynamic=True)
+
+        spec.input_namespace('forces', dynamic=True)
+        spec.input('forces.code', valid_type=Code)
+        spec.input('forces.settings', valid_type=ParameterData)
 
         spec.input_namespace('fitter')
         spec.input('fitter.code', valid_type=Code)
@@ -31,26 +34,30 @@ class FitterWorkChain(WorkChain):
         spec.input('fitter.weights', valid_type=ParameterData)
         spec.input('fitter.options', valid_type=ParameterData)
 
+        # spec.input('force_field', valid_type=PotentialData)
+
         spec.outline(
-            cls.validate_inputs,
-            while_(cls.converging)(
-                cls.fit,
-                cls.process
-            ),
-            cls.finalize
+            cls.validate_inputs
         )
 
-        spec.output('force_field', valid_type=PotentialData)
+        # ,
+        # while_(cls.converging)(
+        #     cls.fit,
+        #     cls.process
+        # ),
+        # cls.finalize
+
+        # spec.output('force_field', valid_type=PotentialData)
 
     def validate_inputs(self):
         parameter_dict = self.inputs.parameters.get_dict()
 
-        self.ctx.step = 0
-        self.ctx.max_steps = parameter_dict.get('max_steps', 10)
+        # self.ctx.step = 0
+        # self.ctx.max_steps = parameter_dict.get('max_steps', 10)
 
-        self.ctx.force_field = self.inputs.force_field
+        # self.ctx.force_field = self.inputs.force_field
 
-        self.ctx.delta = np.inf
+        # self.ctx.delta = np.inf
 
         self.ctx.structures = {}
         self.ctx.energy = {}

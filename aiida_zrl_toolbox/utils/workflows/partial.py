@@ -46,7 +46,7 @@ class PartialOccupancyWorkChain(WorkChain):
             key: float(value)
             for key, value in parameter_dict.get('charges', {}).items()
         }
-
+        self.run()
         self.ctx.structure = self.inputs.structure.get_pymatgen()
 
         self.ctx.partials = []
@@ -110,7 +110,10 @@ class PartialOccupancyWorkChain(WorkChain):
                         energy, swapped = self.__swap(specie, T=1800)
                         if swapped:
                             swaps[-1] += 1
-                            sites = sites[-(self.ctx.max_configurations - 1):] + [deepcopy(self.ctx.sites)]
+                            start = - (self.ctx.max_configurations - 1) \
+                                if len(sites) > self.ctx.max_configurations \
+                                else 0
+                            sites = sites[start:] + [deepcopy(self.ctx.sites)]
                         self.ctx.energy.append(energy)
                 if sum(swaps[-10:]) == 0:
                     break
