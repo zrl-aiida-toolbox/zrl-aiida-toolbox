@@ -29,7 +29,7 @@
         ]
     }, 
     "install_requires": [
-        "aiida_core[atomic_tools]>=0.12.3"
+        "aiida_core[atomic_tools]>=1.0.0a1"
     ], 
     "license": "MIT License", 
     "name": "zrl_aiida_toolbox",
