@@ -46,7 +46,7 @@ class PartialOccupancyWorkChain(WorkChain):
             key: float(value)
             for key, value in parameter_dict.get('charges', {}).items()
         }
-        self.run()
+
         self.ctx.structure = self.inputs.structure.get_pymatgen()
 
         self.ctx.partials = []
@@ -65,8 +65,7 @@ class PartialOccupancyWorkChain(WorkChain):
         with either the ion, or the vacancy site.
         :return:
         """
-
-        self.ctx.static = [
+	self.ctx.static = [
             PeriodicSite(Specie(site.species_and_occu.items()[0][0].value),
                          site.coords, site.lattice, True, True)
             for site in self.ctx.structure if site.species_and_occu.as_dict().items() not in self.ctx.partials
