@@ -15,10 +15,9 @@
         "aiida.data": [
         ],
         "aiida.workflows": [
-            "zrl.utils.replicate = aiida_zrl_toolbox.utils.workflows.replicate:ReplicateWorkChain",
-            "zrl.utils.shake = aiida_zrl_toolbox.utils.workflows.shake:ShakeWorkChain",
-            "zrl.utils.partial_occ = aiida_zrl_toolbox.utils.workflows.partial:PartialOccupancyWorkChain",
-            "zrl.fitter = aiida_zrl_toolbox.fitter.workflows.fitter:FitterWorkChain"
+            "zrl.utils.replicate = zrl_aiida_toolbox.utils.workflows.replicate:ReplicateWorkChain",
+            "zrl.utils.shake = zrl_aiida_toolbox.utils.workflows.shake:ShakeWorkChain",
+            "zrl.utils.partial_occ = zrl_aiida_toolbox.utils.workflows.partial:PartialOccupancyWorkChain"
         ]
     }, 
     "extras_require": {
