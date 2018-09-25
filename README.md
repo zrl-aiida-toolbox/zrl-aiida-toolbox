@@ -106,9 +106,12 @@ The `parameters` input expects the following parameters:
   calculation
 - vacancy `str`: the symbol of the element to be used as vacancy. By default, the workchain 
   uses `Lr`. This does not need to be changed unless there is a conflict.
-- max_rounds `int`: the maximum number of Monte-Carlo steps requested.
-- max_configurations `int`: the maximum number of realizations to return. The workchain will
-  always return at most the `max_configurations`-last generated structures.
+- pick_conf_every `int`: the number of steps between two structures being selected.
+- n_rounds `int`: the maximum number of rounds to execute, each round corresponding to 
+  the pick of one structure.
+- n_conf_target `int`: the number of realizations requested. The workchain will
+  always return at most the requested number of generated structures.
+- temperature `float`: effective temperature for the Monte-Carlo selection.
 
 ### <a name="zrl-utils-shake"></a>ShakeWorkChain (*zrl.utils.shake*)
 
