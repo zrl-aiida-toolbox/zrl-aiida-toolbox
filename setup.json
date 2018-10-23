@@ -9,10 +9,13 @@
     "description": "Toolbox for AiiDA developped at the IBM ZRL.",
     "entry_points": {
         "aiida.calculations": [
+            "zrl.fitter = zrl_aiida_toolbox.fitter.calculations.fitter:FitterCalculation"
         ],
         "aiida.parsers": [
+            "zrl.fitter = zrl_aiida_toolbox.fitter.calculations.fitter:FitterCalculation"
         ],
         "aiida.data": [
+            "zrl.fitter.potential = zrl_aiida_toolbox.fitter.data.potential:PotentialData"
         ],
         "aiida.workflows": [
             "zrl.utils.replicate = zrl_aiida_toolbox.utils.workflows.replicate:ReplicateWorkChain",

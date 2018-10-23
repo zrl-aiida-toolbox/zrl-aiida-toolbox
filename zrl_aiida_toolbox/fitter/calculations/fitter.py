@@ -17,7 +17,7 @@ PotentialData = DataFactory('zrl.fitter.potential')
 
 class FitterCalculation(JobCalculation):
     def _init_internal_params(self):
-        super(FitCalculation, self)._init_internal_params()
+        super(FitterCalculation, self)._init_internal_params()
 
     @classproperty
     def _use_methods(cls):
