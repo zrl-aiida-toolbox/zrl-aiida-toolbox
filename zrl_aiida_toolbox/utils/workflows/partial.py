@@ -14,6 +14,7 @@ from aiida.work.workchain import WorkChain, while_
 StructureData = DataFactory('structure')
 ParameterData = DataFactory('parameter')
 Int = DataFactory('int')
+Bool = DataFactory('bool')
 
 
 class PartialOccupancyWorkChain(WorkChain):
@@ -25,7 +26,7 @@ class PartialOccupancyWorkChain(WorkChain):
         spec.input('structure', valid_type=StructureData)
         spec.input('parameters', valid_type=ParameterData)
         spec.input('seed', valid_type=Int, required=False)
-
+        spec.input('verbose', valid_type=Bool, default=Bool(False))
         spec.outline(
             cls.validate_inputs,
             cls.initialize,
@@ -39,6 +40,9 @@ class PartialOccupancyWorkChain(WorkChain):
         spec.output('seed', valid_type=Int)
 
     def validate_inputs(self):
+        if self.inputs.verbose:
+            self.report('Validating inputs.')
+            
         parameter_dict = self.inputs.parameters.get_dict()
         
         self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**32 - 1))
@@ -47,9 +51,12 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.charges = {
             key: float(value)
             for key, value in parameter_dict.get('charges', {}).items()
-        }        
-        self.ctx.structure = self.inputs.structure.get_pymatgen()
+        }
         
+        self.ctx.structure = self.inputs.structure.get_pymatgen()
+        if self.inputs.verbose:
+            self.report(self.ctx.structure.formula)
+            
         self.ctx.partials = []
         for site in self.ctx.structure:
             species = site.species_and_occu.as_dict().items()
@@ -64,7 +71,7 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.n_rounds = int(parameter_dict.get('n_rounds', self.ctx.n_conf_target + 10))
         
         self.ctx.round = 0
-        self.ctx.do_break = False
+        self.ctx.do_break = 5
         
         self.out('seed', Int(self.ctx.seed))
         
@@ -75,14 +82,23 @@ class PartialOccupancyWorkChain(WorkChain):
         with either the ion, or the vacancy site.
         :return:
         """
+        if self.inputs.verbose:
+            self.report('Initializing')
+            
         self.ctx.static = [
             PeriodicSite(Specie(site.species_and_occu.items()[0][0].value),
                          site.coords, site.lattice, True, True)
             for site in self.ctx.structure if site.species_and_occu.as_dict().items() not in self.ctx.partials
         ]
+        
+        if len(self.ctx.static) == len(self.ctx.structure):
+            self.ctx.do_break = 0
+            self.out('structures.%s' % self.inputs.structure.uuid, self.inputs.structure)
+            return
 
         q, sites = reduce(lambda q, acc: self.__sites_reducer(q, acc), self.ctx.structure, (0, {}))
 
+        self.ctx.configurations = tuple()
         self.ctx.sites = dict()
 
         counts = {}
@@ -96,7 +112,6 @@ class PartialOccupancyWorkChain(WorkChain):
                     occupancy = 0
                     while counts.get(specie.value, 0) + 1 < self.ctx.structure.composition.get(specie.value) + 0.5:
                         occupancy_tmp = (1. + len(new_sites) - start) / len(site)
-                        self.report((specie.value, occupancy, occupancy_tmp))
                         
                         if np.abs(occupancy_tmp - occupancy_target) > np.abs(occupancy - occupancy_target):
                             break
@@ -114,14 +129,16 @@ class PartialOccupancyWorkChain(WorkChain):
             except StopIteration:
                 self.ctx.sites[(total, species)] = new_sites
         self.ctx.energy = [self.__ewald(self.ctx.sites)]
+        
+        if self.inputs.verbose:
+            self.report('Round %4d: E = %f' % (0, self.ctx.energy[-1]))
 
     def do_rounds(self):
-        return self.ctx.round < self.ctx.n_rounds and not self.ctx.do_break
+        return self.ctx.round < self.ctx.n_rounds and self.ctx.do_break > 0
     
     def round(self):
         energies = []
         swaps = []
-        self.ctx.configurations = []
         
         for i in range(self.ctx.pick_conf_every):
             swaps.append(0)
@@ -129,25 +146,33 @@ class PartialOccupancyWorkChain(WorkChain):
                 energy, swapped = self.__swap(specie)
                 if swapped:
                     swaps[-1] += 1
-                    self.ctx.configurations = (self.ctx.configurations[- (self.ctx.n_conf_target - 1):]
-                                               if self.ctx.n_conf_target > 1
-                                               else []) + [deepcopy(self.ctx.sites)]
+                    
+            self.ctx.energy.append(energy)
             energies.append(energy)
         
         self.ctx.round += 1
         
-        if np.std(energies) == 0:
-            self.ctx.do_break = True
+        if np.sum(swaps) > 0:
+            self.ctx.configurations = (self.ctx.configurations[- (self.ctx.n_conf_target - 1):]
+                                       if self.ctx.n_conf_target > 1
+                                       else tuple()) + (deepcopy(self.ctx.sites), )
+            self.ctx.do_break = 5
+        else:
+            self.ctx.do_break -= 1
+                
+        if self.inputs.verbose:
+            self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], np.sum(swaps)))
                     
     def finalize(self):
-        for configuration in self.ctx.configurations:
-            structure = Structure.from_sites(self.ctx.static
-                                             + sum([filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value,
-                                                           value) for value in configuration.values()], []))
-            structure.sort()
-            structure = StructureData(pymatgen=structure)
-            self.out('structures.%s' % structure.uuid, structure)
-        
+        if 'configurations' in self.ctx:
+            for configuration in self.ctx.configurations:
+                structure = Structure.from_sites(self.ctx.static
+                                                 + sum([filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value,
+                                                               value) for value in configuration.values()], []))
+                structure.sort()
+                structure = StructureData(pymatgen=structure)
+                self.out('structures.%s' % structure.uuid, structure) 
+    
     def __ewald(self, sites):
         structure = Structure\
             .from_sites(sum([
@@ -172,7 +197,7 @@ class PartialOccupancyWorkChain(WorkChain):
         i = self.ctx.rs.randint(len(new_sites[species]))
         isite = self.ctx.sites[species][i]
         ispecie = isite.specie
-
+            
         J = [j for j, site in enumerate(new_sites[species]) if site.specie != ispecie]
 
         if len(J) == 0:
@@ -182,7 +207,7 @@ class PartialOccupancyWorkChain(WorkChain):
 
         jsite = self.ctx.sites[species][J[j]]
         jspecie = jsite.specie
-
+            
         new_sites[species][i] = PeriodicSite(jspecie, isite.coords, isite.lattice, True, True)
         new_sites[species][J[j]] = PeriodicSite(ispecie, jsite.coords, jsite.lattice, True, True)
 

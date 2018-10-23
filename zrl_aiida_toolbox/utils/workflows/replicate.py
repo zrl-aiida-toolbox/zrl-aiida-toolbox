@@ -5,6 +5,7 @@ from aiida.work.workchain import WorkChain, if_
 
 StructureData = DataFactory('structure')
 ParameterData = DataFactory('parameter')
+Bool = DataFactory('bool')
 
 
 class ReplicateWorkChain(WorkChain):
@@ -13,6 +14,7 @@ class ReplicateWorkChain(WorkChain):
         super(WorkChain, cls).define(spec)
         spec.input('structure', valid_type=StructureData)
         spec.input('parameters', valid_type=ParameterData)
+        spec.input('verbose', valid_type=Bool, default=Bool(False))
 
         spec.outline(
             cls.validate_inputs,
