@@ -10,66 +10,48 @@ from aiida.orm import JobCalculation, DataFactory
 ParameterData = DataFactory('parameter')
 StructureData = DataFactory('structure')
 ArrayData = DataFactory('array')
+List = DataFactory('list')
+Float = DataFactory('float')
 PotentialData = DataFactory('zrl.fitter.potential')
 
 
 class FitterCalculation(JobCalculation):
     def _init_internal_params(self):
-        super(FitterCalculation, self)._init_internal_params()
-
-        self._default_parser = 'zrl.fitter'
+        super(FitCalculation, self)._init_internal_params()
 
     @classproperty
     def _use_methods(cls):
         retdict = JobCalculation._use_methods
         retdict.update({
-            'structures': {
+            "structures": {
                 'valid_types': StructureData,
                 'additional_parameter': 'uuid',
                 'linkname': cls._get_structures_linkname,
-                'docstring': '',
+                'docstring': "",
             },
-            'force_field': {
+            "potential": {
                 'valid_types': PotentialData,
                 'additional_parameter': None,
-                'linkname': 'force_field',
-                'docstring': ''
+                'linkname': 'potential',
+                'docstring': ""
             },
-            'bounds': {
-                'valid_types': ParameterData,
-                'additional_parameter': None,
-                'linkname': 'bounds',
-                'docstring': ''
-            },
-            'forces': {
+            "forces": {
                 'valid_types': ArrayData,
                 'additional_parameter': 'uuid',
                 'linkname': cls._get_forces_linkname,
-                'docstring': '',
+                'docstring': "",
             },
-            'stress': {
-                'valid_types': ParameterData,
+            "stress": {
+                'valid_types': List,
                 'additional_parameter': 'uuid',
                 'linkname': cls._get_stress_linkname,
-                'docstring': '',
+                'docstring': "",
             },
-            'energy': {
-                'valid_types': ParameterData,
+            "energy": {
+                'valid_types': Float,
                 'additional_parameter': 'uuid',
                 'linkname': cls._get_energy_linkname,
-                'docstring': '',
-            },
-            'parameters': {
-                'valid_types': ParameterData,
-                'additional_parameter': None,
-                'linkname': 'parameters',
-                'docstring': '',
-            },
-            'weights': {
-                'valid_types': ParameterData,
-                'additional_parameter': None,
-                'linkname': 'weights',
-                'docstring': '',
+                'docstring': "",
             }
         })
         return retdict
@@ -91,48 +73,44 @@ class FitterCalculation(JobCalculation):
         return 'energy_%s' % uuid
 
     def _prepare_for_submission(self, tempfolder, inputdict):
-        inputs = dict(references=[],
-                      **self.__prepare_input_dict(inputdict.get('parameters'),
-                                                  inputdict.get('force_field'),
-                                                  inputdict.get('bounds'),
-                                                  inputdict.get('weights')))
+        inputs = dict(fitter=self.__prepare_fitter_input(inputdict),
+                      force_field=self.__prepare_force_field(inputdict),
+                      references=[],
+                      bounds=dict(a=[100, None], c=[1e-9, None],
+                                  rho=[0.005, 0.995], q=[0.5, 1.5]))
 
-        keys = ['energy', 'forces', 'stress']
+        keys = ['forces', 'stress', 'energy']
         copy_list = [(tempfolder.get_abs_path('aiida.in'), '.')]
         for key in inputdict:
             if 'structure' in key:
                 uuid = key.replace('structure_', '')
-                inputs.get('references').append(uuid)
+                inputs['references'].append(uuid)
                 input = tempfolder.get_abs_path(uuid)
                 write((input + '.json').encode('utf8'), inputdict.get(key).get_ase(), format='json')
 
-                headers = np.array(filter(lambda x: ('%s_%s' % (x, uuid)) in inputdict, keys))
                 with open(input + '.npy', 'wb') as file:
-                    np.save(file, headers)
-                    for header in headers:
-                        if header == 'forces':
-                            np.save(file, inputdict.get('forces_%s' % uuid).get_array('forces')[0])
-                            continue
-                        np.save(file, inputdict.get('%s_%s' % (header, uuid, )).get_attr(header))
+                    np.save(file, keys)
+                    np.save(file, inputdict.get('forces_%s' % uuid).get_array('forces')[0])
+                    np.save(file, np.array(inputdict.get('stress_%s' % (uuid,))))
+                    np.save(file, inputdict.get('energy_%s' % (uuid,)).value)
+
                 copy_list += [
                     (input + '.json', '.'),
                     (input + '.npy', '.')
                 ]
 
         with open(tempfolder.get_abs_path('aiida.in'), 'w') as f:
-            json.dump(inputs, f, indent=1)
+            json.dump(inputs, f, indent=3)
 
         calcinfo = CalcInfo()
 
         calcinfo.uuid = self.uuid
         calcinfo.local_copy_list = copy_list
-        calcinfo.retrieve_temporary_list = ['aiida.restart', 'aiida.out']
 
         codeinfo = CodeInfo()
         codeinfo.withmpi = False
         codeinfo.code_uuid = inputdict.get('code').uuid
-        codeinfo.cmdline_params = ['-n', '20', '-i', 'aiida.in', '-o', 'aiida.out', 'run']
-
+        codeinfo.cmdline_params = ['-n', '20', '-i', 'aiida.in', 'run']
         codeinfo.stdout_name = 'aiida.stdout'
         codeinfo.stderr_name = 'aiida.stderr'
 
@@ -140,33 +118,15 @@ class FitterCalculation(JobCalculation):
 
         return calcinfo
 
-    def __prepare_input_dict(self, parameters, force_field, bounds, weights):
-        parameters = parameters.get_dict()
-        weights = weights.get_dict()
+    def __prepare_fitter_input(self, inputdict):
+        return dict(algorithm='scipy')
 
-        return {
-            'fitter': {
-                'algorithm': 'gradient',
-                'output': 'aiida.out',
-                'restart': {
-                    'file': 'aiida.restart',
-                    'save_only': True,
-                    'frequency': parameters.get('restart', {}).get('frequency', 10)
-                },
-                'max_steps': parameters.get('max_steps', 100),
-                'step_size': parameters.get('step_size', 1e-3)
-            },
-            'weights': {
-                'costs': weights.get('costs', {}),
-                'atoms': weights.get('atoms', {})
-            },
-            'bounds': bounds.get_dict(),
-            'force_field': {
-                'pair_type': force_field.pair_type,
-                'bond_type': force_field.bond_type,
-                'unit_charge': force_field.unit_charge,
-                'charges': force_field.charges,
-                'pairs': force_field.pairs,
-                'bonds': force_field.bonds
-            }
-        }
+    def __prepare_force_field(self, inputdict):
+        potential = inputdict.get('potential')
+        return dict(pair_type=potential.pair_type.value,
+                    bond_type=potential.bond_type.value,
+                    unit_charge=potential.unit_charge,
+                    charges=potential.charges,
+                    pairs=potential.pairs,
+                    bonds=potential.bonds,
+                    shells=potential.shells)
