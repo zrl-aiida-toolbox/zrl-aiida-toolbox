@@ -65,7 +65,7 @@ class StableStoichiometryWorkchain(WorkChain):
         
     
     def sampling_method_is_MC(self):
-        return self.inputs.conf_sampling_method == 'sampling_method_MC'
+        return self.inputs.conf_sampling_method.value == 'sampling_method_MC'
 
     
     def no_sampling_method(self):
@@ -86,20 +86,11 @@ class StableStoichiometryWorkchain(WorkChain):
                                    parameters=parameters)
 
         structure_input_Np1 = self.submit(ChangeStoichiometryWorkChain,
-                                          structure=structure_input_N
-                                          species=self.inputs.mobile_species
+                                          structure=structure_input_N,
+                                          species=self.inputs.mobile_species,
                                           delta_N=1)
         
 #         partial_occupancy_structures_Np1 = self.submit(PartialWorkchain,
-#                                                    structure=structure_cif,
-#                                                    parameters=parameters_partial_occ)
-        
-        structure_input_Nm1 = self.submit(ChangeStoichiometryWorkChain,
-                                          structure=structure_input_N
-                                          species=self.inputs.mobile_species
-                                          delta_N=1)
-        
-#         partial_occupancy_structures_Nm1 = self.submit(PartialWorkchain,
 #                                                    structure=structure_cif,
 #                                                    parameters=parameters_partial_occ)
 
