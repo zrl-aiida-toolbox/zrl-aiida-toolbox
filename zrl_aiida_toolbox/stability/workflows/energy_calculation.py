@@ -1,6 +1,9 @@
-from aiida.work.workchain import WorkChain, ToContext
+from aiida.work.workchain import WorkChain, ToContext, if_, while_, return_
 from aiida_quantumespresso.workflows.pw.base import PwBaseWorkChain
-from aiida.orm import Code
+from aiida.orm import Code, LinkType, DataFactory, WorkflowFactory
+from aiida.work.launch import run
+from aiida.work.run import submit
+
 
 StructureData = DataFactory('structure')
 ParameterData = DataFactory('parameter')

@@ -68,7 +68,7 @@ class ChangeStoichiometryWorkChain(WorkChain):
 
     
     def no_distribution(self):
-        print('ERROR: No distribution')
+        print('ERROR: No valid distribution given.')
         return self.exit_codes.ERROR_MISSING_DISTRIBUTION
     
     
@@ -97,7 +97,7 @@ class ChangeStoichiometryWorkChain(WorkChain):
                     weight_species += kind.weights[j]
 
             if (species_count > 1):
-                    print('ERROR')
+                    self.exit_codes.ERROR_PROCESS
 
             if (species_count == 1):
                 change = 0.0
@@ -152,15 +152,14 @@ class ChangeStoichiometryWorkChain(WorkChain):
             weights_out[species_index] += change
             weight_total_out = weight_total + change
             if (weights_out[species_index] < 0.0 - error_tol_occ) or (weight_total_out > 1.0 + error_tol_occ):
-                print('ERROR')
+                self.exit_codes.ERROR_PROCESS
             if (weights_out[species_index] < 0.0):
                 weights_out[species_index] = 0.0
             if (weight_total_out > 0.0 + error_tol_occ):
                 struct_out.append_atom(position=site.position, symbols=kind.symbols, weights=weights_out)
 
         if (abs(atms_to_add) > error_tol_occ):
-            print('ERROR')
-            print(atms_to_add)
+            return self.exit_codes.ERROR_ATOMS_LEFT
 
         for i in fixed_sites:
                 site = structure.sites[i]
