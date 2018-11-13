@@ -6,7 +6,7 @@
         "Programming Language :: Python :: 2.7", 
         "Development Status :: 0 - Alpha"
     ], 
-    "description": "Toolbox for AiiDA developped at the IBM ZRL.",
+    "description": "Toolbox for AiiDA developped at IBM Research - Zurich (ZRL).",
     "entry_points": {
         "aiida.calculations": [
             "zrl.fitter = zrl_aiida_toolbox.fitter.calculations.fitter:FitterCalculation"
@@ -20,7 +20,8 @@
         "aiida.workflows": [
             "zrl.utils.replicate = zrl_aiida_toolbox.utils.workflows.replicate:ReplicateWorkChain",
             "zrl.utils.shake = zrl_aiida_toolbox.utils.workflows.shake:ShakeWorkChain",
-            "zrl.utils.partial_occ = zrl_aiida_toolbox.utils.workflows.partial:PartialOccupancyWorkChain"
+            "zrl.utils.partial_occ = zrl_aiida_toolbox.utils.workflows.partial:PartialOccupancyWorkChain",
+            "zrl.workchains.stable_stoichiometry = zrl_aiida_toolbox.stability.workflows.stable_stoichiometry:StableStoichiometryWorkChain"
         ]
     }, 
     "extras_require": {
