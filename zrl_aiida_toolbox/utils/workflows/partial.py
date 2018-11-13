@@ -87,7 +87,7 @@ class PartialOccupancyWorkChain(WorkChain):
         :return:
         """            
         self.ctx.static = [
-            PeriodicSite(Specie(site.species_and_occu.items()[0][0].value),
+            PeriodicSite(Specie(site.species_and_occu.items()[0][0].symbol),
                          site.coords, site.lattice, True, True)
             for site in self.ctx.structure if site.species_and_occu.as_dict().items() not in self.ctx.partials
         ]
@@ -114,7 +114,8 @@ class PartialOccupancyWorkChain(WorkChain):
             try:
                 for specie, occupancy_target in chain(species, ((self.ctx.vacancy, 1),)):
                     occupancy = 0
-                    while counts.get(specie.value, 0) + 1 < self.ctx.structure.composition.get(specie.value) + 0.5:
+                    while counts.get((specie.symbol, specie.oxi_state), 0) + 1 \
+                          < self.ctx.structure.composition.get((specie.symbol, specie.oxi_state)) + 0.5:
                         occupancy_tmp = (1. + len(new_sites) - start) / len(site)
                         
                         if np.abs(occupancy_tmp - occupancy_target) > np.abs(occupancy - occupancy_target):
@@ -122,9 +123,11 @@ class PartialOccupancyWorkChain(WorkChain):
                         
                         occupancy = occupancy_tmp
                         new_site = next(itr)
-                        counts.setdefault(specie.value, 0)
-                        counts[specie.value] += 1
-                        new_sites.append(PeriodicSite(Specie(specie.value, self.ctx.charges.get(specie.value, 0)),
+                        counts.setdefault((specie.symbol, specie.oxi_state), 0)
+                        counts[(specie.symbol, specie.oxi_state)] += 1
+                        new_sites.append(PeriodicSite(Specie(specie.symbol, self.ctx.charges.get(specie.symbol, 0))
+                                                      if isinstance(specie, Specie)
+                                                      else DummySpecie(),
                                                       new_site.coords, new_site.lattice, True, True))
                     start = len(new_sites)
                 while True:
@@ -200,7 +203,7 @@ class PartialOccupancyWorkChain(WorkChain):
             acc.setdefault((sum([x[1] for x in species]), species), [])
             acc.get((sum([x[1] for x in species]), species)).append(cur)
         else:
-            q += self.ctx.charges.get(species[0][0].value, 0)
+            q += self.ctx.charges.get(species[0][0].symbol, 0)
         return q, acc
 
     def __swap(self, species):
