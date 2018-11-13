@@ -17,7 +17,7 @@ class FitterParser(Parser):
         super(FitterParser, self).__init__(calc)
 
     def parse_with_retrieved(self, retrieved):
-        with open('%s/aiida.restart' % retrieved.get('retrieved_temporary_folder')) as f:
+        with open('%s/potential.restart' % retrieved.get('retrieved_temporary_folder')) as f:
             restart = json.load(f)
 
             force_field = restart.get('force_field')
@@ -26,10 +26,15 @@ class FitterParser(Parser):
                                       unit_charge=force_field.get('unit_charge'),
                                       charges=force_field.get('charges'),
                                       pairs=force_field.get('pairs'),
-                                      bonds=force_field.get('bonds'))
+                                      bonds=force_field.get('bonds'),
+                                      shells=force_field.get('shells'))
 
         with open('%s/aiida.out' % retrieved.get('retrieved_temporary_folder')) as f:
-            data = np.loadtxt(f)
+            data = []
+            for line in f:
+                line = line.strip()
+                if line and line[0] not in '[#':
+                    data.append(np.fromstring(data, sep=' '))
 
             array = ArrayData()
 

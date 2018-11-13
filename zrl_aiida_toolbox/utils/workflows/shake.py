@@ -28,7 +28,7 @@ class ShakeWorkChain(WorkChain):
     def validate_inputs(self):
         parameter_dict = self.inputs.parameters.get_dict()
 
-        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**32 - 1))
+        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
 
         self.ctx.stdev_atms = float(parameter_dict.get('stdev_atms', 0))
