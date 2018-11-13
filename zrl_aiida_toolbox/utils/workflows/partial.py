@@ -45,7 +45,7 @@ class PartialOccupancyWorkChain(WorkChain):
             
         parameter_dict = self.inputs.parameters.get_dict()
         
-        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**32 - 1))
+        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
         
         self.ctx.charges = {
@@ -63,15 +63,19 @@ class PartialOccupancyWorkChain(WorkChain):
             if (len(species) > 1 or species[0][1] < 1) and species not in self.ctx.partials:
                 self.ctx.partials.append(species)
         
-        self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion') if 'vacancy_ion' in parameter_dict else 'Lr', 0)
+        self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion') if 'vacancy_ion' in parameter_dict else 'X', 0)
         
         self.ctx.temperature = float(parameter_dict.get('temperature', 1000))
         self.ctx.n_conf_target = int(parameter_dict.get('n_conf_target', 1))
         self.ctx.pick_conf_every = int(parameter_dict.get('pick_conf_every', 25))
-        self.ctx.n_rounds = int(parameter_dict.get('n_rounds', self.ctx.n_conf_target + 10))
+        self.ctx.equilibration = int(parameter_dict.get('equilibration', 10))
+        self.ctx.n_rounds = int(parameter_dict.get('n_rounds', 
+                                                   self.ctx.equilibration 
+                                                   + self.ctx.n_conf_target 
+                                                   + 10))
         
         self.ctx.round = 0
-        self.ctx.do_break = 5
+        self.ctx.do_break = 10
         
         self.out('seed', Int(self.ctx.seed))
         
@@ -81,10 +85,7 @@ class PartialOccupancyWorkChain(WorkChain):
         Prepare self.ctx.sites, a dictionary containing, for each type of partially occupied site, the list of site,
         with either the ion, or the vacancy site.
         :return:
-        """
-        if self.inputs.verbose:
-            self.report('Initializing')
-            
+        """            
         self.ctx.static = [
             PeriodicSite(Specie(site.species_and_occu.items()[0][0].value),
                          site.coords, site.lattice, True, True)
@@ -103,9 +104,12 @@ class PartialOccupancyWorkChain(WorkChain):
 
         counts = {}
         for total, species in sorted(sites.keys(), key=lambda x: x[0], reverse=True):
-            site = sites.get((total, species))
+            print(total, species)
+        
+            site = [site for site in sites.get((total, species))]
             new_sites = []
             start = 0
+            self.ctx.rs.shuffle(site)
             itr = iter(site)
             try:
                 for specie, occupancy_target in chain(species, ((self.ctx.vacancy, 1),)):
@@ -131,7 +135,7 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.energy = [self.__ewald(self.ctx.sites)]
         
         if self.inputs.verbose:
-            self.report('Round %4d: E = %f' % (0, self.ctx.energy[-1]))
+            self.report('Starting structure: E = %f' % (0, self.ctx.energy[-1]))
 
     def do_rounds(self):
         return self.ctx.round < self.ctx.n_rounds and self.ctx.do_break > 0
@@ -142,6 +146,7 @@ class PartialOccupancyWorkChain(WorkChain):
         
         for i in range(self.ctx.pick_conf_every):
             swaps.append(0)
+            
             for specie in self.ctx.sites.keys():
                 energy, swapped = self.__swap(specie)
                 if swapped:
@@ -151,15 +156,22 @@ class PartialOccupancyWorkChain(WorkChain):
             energies.append(energy)
         
         self.ctx.round += 1
-        
-        if np.sum(swaps) > 0:
-            self.ctx.configurations = (self.ctx.configurations[- (self.ctx.n_conf_target - 1):]
-                                       if self.ctx.n_conf_target > 1
-                                       else tuple()) + (deepcopy(self.ctx.sites), )
-            self.ctx.do_break = 5
+        if len(self.ctx.configurations) < self.ctx.n_conf_target:
+            self.ctx.configurations += (deepcopy(self.ctx.sites), )
         else:
-            self.ctx.do_break -= 1
+            r = self.ctx.rs.randint(2**31 - 1) % self.ctx.round
+            keep = r < self.ctx.n_conf_target
+            
+            if keep:
+                self.ctx.configurations = self.ctx.configurations[:r] + (deepcopy(self.ctx.sites), ) + self.ctx.configurations[r + 1:]
+                self.ctx.do_break = 10
+            else:
+                self.ctx.do_break -= 1
                 
+            # self.ctx.configurations = (self.ctx.configurations[- (self.ctx.n_conf_target - 1):]
+            #                            if self.ctx.n_conf_target > 1
+            #                            else tuple()) + (deepcopy(self.ctx.sites), )
+            
         if self.inputs.verbose:
             self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], np.sum(swaps)))
                     
@@ -197,17 +209,17 @@ class PartialOccupancyWorkChain(WorkChain):
         i = self.ctx.rs.randint(len(new_sites[species]))
         isite = self.ctx.sites[species][i]
         ispecie = isite.specie
-            
+        
         J = [j for j, site in enumerate(new_sites[species]) if site.specie != ispecie]
 
         if len(J) == 0:
             return self.ctx.energy[-1], False
-
+        
         j = self.ctx.rs.randint(len(J))
-
+        
         jsite = self.ctx.sites[species][J[j]]
         jspecie = jsite.specie
-            
+        
         new_sites[species][i] = PeriodicSite(jspecie, isite.coords, isite.lattice, True, True)
         new_sites[species][J[j]] = PeriodicSite(ispecie, jsite.coords, jsite.lattice, True, True)
 
