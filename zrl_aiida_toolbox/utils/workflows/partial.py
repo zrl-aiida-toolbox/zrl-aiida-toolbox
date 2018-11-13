@@ -3,8 +3,10 @@ from itertools import chain
 
 import numpy as np
 
-from pymatgen.core import Lattice, PeriodicSite, Specie, Structure, DummySpecie
+from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.ewald import EwaldSummation
+from pymatgen.core.sites import PeriodicSite, Specie
+from pymatgen.core.structure import Structure
 
 from aiida.orm import DataFactory
 from aiida.work.workchain import WorkChain, while_
@@ -61,9 +63,7 @@ class PartialOccupancyWorkChain(WorkChain):
             if (len(species) > 1 or species[0][1] < 1) and species not in self.ctx.partials:
                 self.ctx.partials.append(species)
         
-        self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion'), 0) \
-                           if 'vacancy_ion' in parameter_dict \
-                           else DummySpecie()
+        self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion') if 'vacancy_ion' in parameter_dict else 'Lr', 0)
         
         self.ctx.temperature = float(parameter_dict.get('temperature', 1000))
         self.ctx.n_conf_target = int(parameter_dict.get('n_conf_target', 1))
@@ -87,7 +87,7 @@ class PartialOccupancyWorkChain(WorkChain):
         :return:
         """            
         self.ctx.static = [
-            PeriodicSite(Specie(site.species_and_occu.items()[0][0].symbol),
+            PeriodicSite(Specie(site.species_and_occu.items()[0][0].value),
                          site.coords, site.lattice, True, True)
             for site in self.ctx.structure if site.species_and_occu.as_dict().items() not in self.ctx.partials
         ]
@@ -114,8 +114,7 @@ class PartialOccupancyWorkChain(WorkChain):
             try:
                 for specie, occupancy_target in chain(species, ((self.ctx.vacancy, 1),)):
                     occupancy = 0
-                    while counts.get((specie.symbol, specie.oxi_state), 0) + 1 \
-                          < self.ctx.structure.composition.get((specie.symbol, specie.oxi_state)) + 0.5:
+                    while counts.get(specie.value, 0) + 1 < self.ctx.structure.composition.get(specie.value) + 0.5:
                         occupancy_tmp = (1. + len(new_sites) - start) / len(site)
                         
                         if np.abs(occupancy_tmp - occupancy_target) > np.abs(occupancy - occupancy_target):
@@ -123,11 +122,9 @@ class PartialOccupancyWorkChain(WorkChain):
                         
                         occupancy = occupancy_tmp
                         new_site = next(itr)
-                        counts.setdefault((specie.symbol, specie.oxi_state), 0)
-                        counts[(specie.symbol, specie.oxi_state)] += 1
-                        new_sites.append(PeriodicSite(Specie(specie.symbol, self.ctx.charges.get(specie.symbol, 0))
-                                                      if isinstance(specie, Specie)
-                                                      else DummySpecie(),
+                        counts.setdefault(specie.value, 0)
+                        counts[specie.value] += 1
+                        new_sites.append(PeriodicSite(Specie(specie.value, self.ctx.charges.get(specie.value, 0)),
                                                       new_site.coords, new_site.lattice, True, True))
                     start = len(new_sites)
                 while True:
@@ -203,7 +200,7 @@ class PartialOccupancyWorkChain(WorkChain):
             acc.setdefault((sum([x[1] for x in species]), species), [])
             acc.get((sum([x[1] for x in species]), species)).append(cur)
         else:
-            q += self.ctx.charges.get(species[0][0].symbol, 0)
+            q += self.ctx.charges.get(species[0][0].value, 0)
         return q, acc
 
     def __swap(self, species):
@@ -231,4 +228,4 @@ class PartialOccupancyWorkChain(WorkChain):
         if np.exp(np.min([500, -(energy - self.ctx.energy[-1]) / (self.__k_b * self.ctx.temperature)])) > self.ctx.rs.rand():
             self.ctx.sites = new_sites
             return energy, True
-        return self.ctx.energy[-1], False
+return self.ctx.energy[-1], False
