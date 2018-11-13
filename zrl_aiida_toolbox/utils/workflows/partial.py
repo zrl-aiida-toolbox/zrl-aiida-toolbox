@@ -228,4 +228,4 @@ class PartialOccupancyWorkChain(WorkChain):
         if np.exp(np.min([500, -(energy - self.ctx.energy[-1]) / (self.__k_b * self.ctx.temperature)])) > self.ctx.rs.rand():
             self.ctx.sites = new_sites
             return energy, True
-return self.ctx.energy[-1], False
+        return self.ctx.energy[-1], False
