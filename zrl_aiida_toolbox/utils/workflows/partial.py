@@ -3,10 +3,8 @@ from itertools import chain
 
 import numpy as np
 
-from pymatgen.core.lattice import Lattice
+from pymatgen.core import Lattice, PeriodicSite, Specie, Structure, DummySpecie
 from pymatgen.analysis.ewald import EwaldSummation
-from pymatgen.core.sites import PeriodicSite, Specie
-from pymatgen.core.structure import Structure
 
 from aiida.orm import DataFactory
 from aiida.work.workchain import WorkChain, while_
@@ -63,7 +61,9 @@ class PartialOccupancyWorkChain(WorkChain):
             if (len(species) > 1 or species[0][1] < 1) and species not in self.ctx.partials:
                 self.ctx.partials.append(species)
         
-        self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion') if 'vacancy_ion' in parameter_dict else 'X', 0)
+        self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion'), 0) \
+                           if 'vacancy_ion' in parameter_dict \
+                           else DummySpecie()
         
         self.ctx.temperature = float(parameter_dict.get('temperature', 1000))
         self.ctx.n_conf_target = int(parameter_dict.get('n_conf_target', 1))
