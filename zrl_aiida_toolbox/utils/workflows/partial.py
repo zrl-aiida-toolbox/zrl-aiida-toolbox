@@ -226,22 +226,21 @@ class PartialOccupancyWorkChain(WorkChain):
             energies.append(energy)
         
         self.ctx.round += 1
-        if len(self.ctx.configurations) < self.ctx.n_conf_target:
-            self.ctx.configurations += (deepcopy(self.ctx.sites), )
-        else:
-            r = self.ctx.rs.randint(2**31 - 1) % self.ctx.round
-            keep = r < self.ctx.n_conf_target
-            
-            if keep:
-                self.ctx.configurations = self.ctx.configurations[:r] + (deepcopy(self.ctx.sites), ) + self.ctx.configurations[r + 1:]
-                self.ctx.do_break = 10
+        if self.ctx.round > self.ctx.equilibration:
+            # Implementation of a reservoir sampling selection after the equilibration steps
+            # All structures generated after the equilibration steps have the same probability
+            # of being retured.
+            if len(self.ctx.configurations) < self.ctx.n_conf_target:
+                self.ctx.configurations += (deepcopy(self.ctx.sites), )
             else:
-                self.ctx.do_break -= 1
-                
-            # self.ctx.configurations = (self.ctx.configurations[- (self.ctx.n_conf_target - 1):]
-            #                            if self.ctx.n_conf_target > 1
-            #                            else tuple()) + (deepcopy(self.ctx.sites), )
-            
+                r = self.ctx.rs.randint(2**31 - 1) % (self.ctx.round - self.ctx.equilibration)
+                keep = r < self.ctx.n_conf_target
+                if keep:
+                    self.ctx.configurations = self.ctx.configurations[:r] + (deepcopy(self.ctx.sites), ) + self.ctx.configurations[r + 1:]
+                    self.ctx.do_break = 10
+                else:
+                    self.ctx.do_break -= 1
+
         if self.inputs.verbose:
             self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], np.sum(swaps)))
                     
@@ -249,8 +248,8 @@ class PartialOccupancyWorkChain(WorkChain):
         if 'configurations' in self.ctx:
             for configuration in self.ctx.configurations:
                 structure = Structure.from_sites(self.ctx.static
-                                                 + sum([filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value,
-                                                               value) for value in configuration.values()], []))
+                                                 + sum([list(filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value,
+                                                                    value)) for value in configuration.values()], []))
                 structure.sort()
                 structure = StructureData(pymatgen=structure)
                 self.out('structures.%s' % structure.uuid, structure) 
