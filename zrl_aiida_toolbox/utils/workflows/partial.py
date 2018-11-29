@@ -13,6 +13,7 @@ from aiida.work.workchain import WorkChain, while_
 
 StructureData = DataFactory('structure')
 ParameterData = DataFactory('parameter')
+ArrayData = DataFactory('array')
 Int = DataFactory('int')
 Bool = DataFactory('bool')
 
@@ -38,6 +39,7 @@ class PartialOccupancyWorkChain(WorkChain):
 
         spec.output_namespace('structures', valid_type=StructureData, dynamic=True)
         spec.output('seed', valid_type=Int)
+        spec.output('energy', valid_type=ArrayData)
 
     def validate_inputs(self):
         if self.inputs.verbose:
@@ -60,12 +62,6 @@ class PartialOccupancyWorkChain(WorkChain):
             if composition != np.floor(composition):
                 self.report('Warning: the input structure has a non integer composition for element `%s`, you '
                             'might be loosing an atom.' % element)
-            
-#         self.ctx.partials = []
-#         for site in self.ctx.structure:
-#             species = site.species_and_occu.as_dict().items()
-#             if (len(species) > 1 or species[0][1] < 1) and species not in self.ctx.partials:
-#                 self.ctx.partials.append(species)
         
         self.ctx.vacancy = Specie(parameter_dict.get('vacancy_ion') if 'vacancy_ion' in parameter_dict else 'Lr', 0)
         
@@ -84,7 +80,7 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.round = 0
         self.ctx.do_break = 10
         
-        self.out('seed', Int(self.ctx.seed))
+        self.out('seed', Int(self.ctx.seed))        
         
     def initialize(self):
         """
@@ -189,7 +185,6 @@ class PartialOccupancyWorkChain(WorkChain):
         return self.ctx.round < self.ctx.n_rounds and self.ctx.do_break > 0
     
     def round(self):
-        energies = []
         swaps = 0
         
         for i in range(self.ctx.pick_conf_every):
@@ -199,8 +194,8 @@ class PartialOccupancyWorkChain(WorkChain):
                                     
             energy, swapped = self.__keep(new_sites)
             swaps += swapped
-            self.ctx.energy.append(energy)
-            energies.append(energy)
+        
+        self.ctx.energy.append(energy)
         
         self.ctx.round += 1
         if self.ctx.round > self.ctx.equilibration:
@@ -236,6 +231,9 @@ class PartialOccupancyWorkChain(WorkChain):
         if 'configurations' in self.ctx:
             for structure in self.ctx.configurations:
                 self.out('structures.%s' % structure.uuid, structure) 
+            energy = ArrayData()
+            energy.set_array('energy', np.array(self.ctx.energy))
+            self.out('energy', energy)
     
     def __ewald(self, sites):
         structure = Structure\
