@@ -71,7 +71,7 @@ class PartialOccupancyWorkChain(WorkChain):
         
         self.ctx.temperature = float(parameter_dict.get('temperature', 1000))
         self.ctx.n_conf_target = int(parameter_dict.get('n_conf_target', 1))
-        self.ctx.pick_conf_every = int(parameter_dict.get('pick_conf_every', 25))
+        self.ctx.pick_conf_every = int(parameter_dict.get('pick_conf_every', 100))
         self.ctx.equilibration = int(parameter_dict.get('equilibration', 10))
         self.ctx.n_rounds = int(parameter_dict.get('n_rounds', 
                                                    self.ctx.equilibration 
