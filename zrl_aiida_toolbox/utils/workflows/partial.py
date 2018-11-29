@@ -220,8 +220,11 @@ class PartialOccupancyWorkChain(WorkChain):
                         keep = r < self.ctx.n_conf_target
                         if keep:
                             self.ctx.configurations = self.ctx.configurations[:r] \
-                                + (deepcopy(self.ctx.sites), ) \
+                                + (structure, ) \
                                 + self.ctx.configurations[r + 1:]
+                            self.ctx.configuration_hashes = self.ctx.configuration_hashes[:r] \
+                                + (hash, ) \
+                                + self.ctx.configuration_hashes[r + 1:]
                     elif self.ctx.selection == 1:
                         self.ctx.configurations = (structure, ) + self.ctx.configurations[-self.ctx.n_conf_target + 1:]
                         self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[-self.ctx.n_conf_target + 1:]
