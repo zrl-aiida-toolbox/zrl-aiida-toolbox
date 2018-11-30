@@ -172,7 +172,9 @@ class PartialOccupancyWorkChain(WorkChain):
             for _ in range(np.ceil(np.log10(tmp)).astype(int)):
                 self.ctx.select.append(comp)
                 
-        self.ctx.rs.shuffle(self.ctx.select)
+            self.report(self.ctx.select)
+                
+        self.ctx.idxes = [idx for idx in range(len(self.ctx.select))]
         self.ctx.sites = self.ctx.partial
         del self.ctx.partial
         
@@ -251,7 +253,9 @@ class PartialOccupancyWorkChain(WorkChain):
         return True
 
     def __swap(self, sites):
-        species = self.ctx.rs.choice(self.ctx.select)
+        
+        idx = self.ctx.rs.choice(self.ctx.idxes)
+        species = self.ctx.select[idx]
         
         new_sites = deepcopy(sites)
 
