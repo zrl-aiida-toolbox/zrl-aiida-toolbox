@@ -100,6 +100,7 @@ assuming point-charge particles using a Monte-Carlo approach.
 **Outputs:**
 - structures: `[StructureData]`
 - seed: `Int`
+- energy: `ArrayData`
 
 The `parameters` input expects the following parameters:
 - charges `{str: float}`: a dictionary containing the charges to be used for the energy 
