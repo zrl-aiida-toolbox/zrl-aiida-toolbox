@@ -171,9 +171,7 @@ class PartialOccupancyWorkChain(WorkChain):
                                                                   site.coords, site.lattice, True, True))
             for _ in range(np.ceil(np.log10(tmp)).astype(int)):
                 self.ctx.select.append(comp)
-                
-            self.report(self.ctx.select)
-                
+                                
         self.ctx.idxes = [idx for idx in range(len(self.ctx.select))]
         self.ctx.sites = self.ctx.partial
         del self.ctx.partial
