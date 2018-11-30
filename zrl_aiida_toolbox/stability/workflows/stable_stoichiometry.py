@@ -174,7 +174,11 @@ class StableStoichiometryWorkchain(WorkChain):
                           n_conf_target=1))
         
         futures = {}
+        print('before')
+        print(self.inputs.num_configurations.value)
+        print('loop')
         for i in range(self.inputs.num_configurations.value):
+            print(i)
             future = self.submit(PartialOccupancyWorkChain,
                                  structure=self.ctx.structure_input_N,
                                  parameters=parameters)
