@@ -62,10 +62,14 @@ class StableStoichiometryWorkchain(WorkChain):
 #            cls.compute_potentials,
             cls.set_output
         )
-        
+
         spec.output('structure_N', valid_type=StructureData)
         spec.output('structure_Np1', valid_type=StructureData)
         spec.output('structure_Nm1', valid_type=StructureData)
+        spec.output_namespace('structures_N', valid_type=StructureData, dynamic=True)
+        spec.output_namespace('structures_Np1', valid_type=StructureData, dynamic=True)
+        spec.output_namespace('structures_Nm1', valid_type=StructureData, dynamic=True)
+
 #        spec.output_namespace('test', valid_type=Float, dynamic=True)
 #        spec.output('phi_red', valid_type=Float)
 #        spec.output('phi_ox', valid_type=Float)
@@ -163,7 +167,11 @@ class StableStoichiometryWorkchain(WorkChain):
     
     
     def generate_structures_MC(self):
-        parameters = self.inputs.sampling_charges
+        parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
+                          selection='last',
+                          n_rounds=400,
+                          pick_conf_every=1,
+                          n_conf_target=1))
         
         futures = {}
         for i in range(self.inputs.num_configurations.value):
@@ -217,7 +225,7 @@ class StableStoichiometryWorkchain(WorkChain):
                             print('Composition N: ', composition)
                             print('Composition reference N: ', composition_ref)
                             return self.exit_codes.ERROR_COMPOSITION
-
+                        
             composition_ref = copy.deepcopy(composition_ref_N)
             composition_ref[str(self.inputs.mobile_species)] += 1.0
             self.ctx.structures_Np1_dict = {}
@@ -240,7 +248,7 @@ class StableStoichiometryWorkchain(WorkChain):
                             print('Composition Np1: ', composition)
                             print('Composition reference Np1: ', composition_ref)                        
                             return self.exit_codes.ERROR_COMPOSITION
-
+                        
             composition_ref = copy.deepcopy(composition_ref_N)
             composition_ref[str(self.inputs.mobile_species)] -= 1.0
             self.ctx.structures_Nm1_dict = {}
@@ -311,7 +319,13 @@ class StableStoichiometryWorkchain(WorkChain):
 
         
     def set_output(self):
-        pass        
+        for key in self.ctx.structures_N_dict:
+            self.out('structures_N.%s' % key, self.ctx.structures_N_dict[key])
+        for key in self.ctx.structures_Np1_dict:
+            self.out('structures_Np1.%s' % key, self.ctx.structures_Np1_dict[key])
+        for key in self.ctx.structures_Nm1_dict:
+            self.out('structures_Nm1.%s' % key, self.ctx.structures_Nm1_dict[key])
+        
 #         self.out('phi_red', Float(self.ctx.phi_red))
 #         self.out('phi_ox', Float(self.ctx.phi_ox))
 
