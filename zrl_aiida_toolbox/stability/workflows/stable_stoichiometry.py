@@ -39,6 +39,7 @@ class StableStoichiometryWorkchain(WorkChain):
         spec.input('conf_sampling_method', valid_type=Str, required=True)
         spec.input('sampling_charges', valid_type=ParameterData, required=True)
         spec.input('energy_ref', valid_type=Float, required=True)
+        spec.input('num_configurations', valid_type=Int, required=True)
         spec.input('stoichiometry_rel_tol', valid_type=Float, default=Float(0.05), required=False)
         spec.input('min_cell_volume', valid_type=Float, default=Float(1000.0), required=False)
         spec.input('max_cell_volume', valid_type=Float, default=Float(10000.0), required=False)
@@ -164,21 +165,26 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_structures_MC(self):
         parameters = self.inputs.sampling_charges
         
-        structures_N_future = self.submit(PartialOccupancyWorkChain,
-                                   structure=self.ctx.structure_input_N,
-                                   parameters=parameters)
+        futures = {}
+        for i in range(self.inputs.num_configurations.value):
+            future = self.submit(PartialOccupancyWorkChain,
+                                 structure=self.ctx.structure_input_N,
+                                 parameters=parameters)
+            futures['N-%d' % i] = future
 
-        structures_Np1_future = self.submit(PartialOccupancyWorkChain,
-                                     structure=self.ctx.structure_input_Np1,
-                                     parameters=parameters)
-        
-        structures_Nm1_future = self.submit(PartialOccupancyWorkChain,
-                                     structure=self.ctx.structure_input_Nm1,
-                                     parameters=parameters)
+            future = self.submit(PartialOccupancyWorkChain,
+                                         structure=self.ctx.structure_input_Np1,
+                                         parameters=parameters)
+            futures['Np1-%d' % i] = future
 
-        return ToContext(structures_N=structures_N_future,
-                         structures_Np1=structures_Np1_future,
-                         structures_Nm1=structures_Nm1_future)
+            future = self.submit(PartialOccupancyWorkChain,
+                                         structure=self.ctx.structure_input_Nm1,
+                                         parameters=parameters)
+            futures['Nm1-%d' % i] = future
+
+        return ToContext(**futures)
+#                          structures_Np1=structures_Np1_future,
+#                          structures_Nm1=structures_Nm1_future)
 
     
     def check_charges_composition(self):
@@ -188,67 +194,75 @@ class StableStoichiometryWorkchain(WorkChain):
         composition_ref = copy.deepcopy(composition_ref_N)
         self.ctx.structures_N_dict = {}
         i = -1
-        for j in range(len(self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN))):
-            if (type(self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
-                i += 1
-                key = 'structure_N_%i' % i
-                self.ctx.structures_N_dict[key] = self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN)[j]
-                structure_py = self.ctx.structures_N_dict[key].get_pymatgen()
-                composition = structure_py.composition.as_dict()
-                total_charge = self.__total_charge(composition, self.ctx.charge_dict)
-                if np.abs(total_charge) > 0.001:
-                    print('ERROR: Incorrect charge balance.')
-                    return self.exit_codes.ERROR_CHARGE_BALANCE
-                for species in composition:
-                    if np.abs(composition[species]/composition_ref[species] - 1.0) > float(self.inputs.stoichiometry_rel_tol): 
-                        print('ERROR: Incorrect composition.')
-                        print('Composition N: ', composition)
-                        print('Composition reference N: ', composition_ref)
-                        return self.exit_codes.ERROR_COMPOSITION
+        for k in range(self.inputs.num_configurations.value):
+            self.ctx.structures_N = self.ctx['N-%d' % k]
+            self.ctx.structures_Np1 = self.ctx['Np1-%d' % k]
+            self.ctx.structures_Nm1 = self.ctx['Nm1-%d' % k]
+            
+            for j in range(len(self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN))):
+                if (type(self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
+                    i += 1
+                    key = 'structure_N_%i' % i
+                    self.ctx.structures_N_dict[key] = self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN)[j]
+                    structure_py = self.ctx.structures_N_dict[key].get_pymatgen()
+                    composition = structure_py.composition.as_dict()
+                    total_charge = self.__total_charge(composition, self.ctx.charge_dict)
+                    if np.abs(total_charge) > 0.001:
+                        print('ERROR: Incorrect charge balance.')
+                        return self.exit_codes.ERROR_CHARGE_BALANCE
+                    for species in composition:
+                        if np.abs(composition[species]/composition_ref[species] - 1.0) > \
+                            float(self.inputs.stoichiometry_rel_tol): 
+                            print('ERROR: Incorrect composition.')
+                            print('Composition N: ', composition)
+                            print('Composition reference N: ', composition_ref)
+                            return self.exit_codes.ERROR_COMPOSITION
 
-        composition_ref = copy.deepcopy(composition_ref_N)
-        composition_ref[str(self.inputs.mobile_species)] += 1.0
-        self.ctx.structures_Np1_dict = {}
-        i = -1
-        for j in range(len(self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN))):
-            if (type(self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
-                i += 1
-                key = 'structure_Np1_%i' % i
-                self.ctx.structures_Np1_dict[key] = self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN)[j]
-                structure_py = self.ctx.structures_Np1_dict[key].get_pymatgen()
-                composition = structure_py.composition.as_dict()
-                total_charge = self.__total_charge(composition, self.ctx.charge_dict)
-                if np.abs(total_charge - self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
-                    print('ERROR: Incorrect charge balance.')
-                    return self.exit_codes.ERROR_CHARGE_BALANCE                
-                for species in composition:
-                    if np.abs(composition[species]/composition_ref[species] - 1.0) > float(self.inputs.stoichiometry_rel_tol):
-                        print('ERROR: Incorrect composition.')
-                        print('Composition Np1: ', composition)
-                        print('Composition reference Np1: ', composition_ref)                        
-                        return self.exit_codes.ERROR_COMPOSITION
+            composition_ref = copy.deepcopy(composition_ref_N)
+            composition_ref[str(self.inputs.mobile_species)] += 1.0
+            self.ctx.structures_Np1_dict = {}
+            i = -1
+            for j in range(len(self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN))):
+                if (type(self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
+                    i += 1
+                    key = 'structure_Np1_%i' % i
+                    self.ctx.structures_Np1_dict[key] = self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN)[j]
+                    structure_py = self.ctx.structures_Np1_dict[key].get_pymatgen()
+                    composition = structure_py.composition.as_dict()
+                    total_charge = self.__total_charge(composition, self.ctx.charge_dict)
+                    if np.abs(total_charge - self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
+                        print('ERROR: Incorrect charge balance.')
+                        return self.exit_codes.ERROR_CHARGE_BALANCE                
+                    for species in composition:
+                        if np.abs(composition[species]/composition_ref[species] - 1.0) > \
+                            float(self.inputs.stoichiometry_rel_tol):
+                            print('ERROR: Incorrect composition.')
+                            print('Composition Np1: ', composition)
+                            print('Composition reference Np1: ', composition_ref)                        
+                            return self.exit_codes.ERROR_COMPOSITION
 
-        composition_ref = copy.deepcopy(composition_ref_N)
-        composition_ref[str(self.inputs.mobile_species)] -= 1.0
-        self.ctx.structures_Nm1_dict = {}
-        i = -1
-        for j in range(len(self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN))):
-            if (type(self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
-                i += 1
-                key = 'structure_Nm1_%i' % i
-                self.ctx.structures_Nm1_dict[key] = self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN)[j]
-                structure_py = self.ctx.structures_Nm1_dict[key].get_pymatgen()
-                composition = structure_py.composition.as_dict()
-                total_charge = self.__total_charge(composition, self.ctx.charge_dict)
-                if np.abs(total_charge + self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
-                    print('ERROR: Incorrect charge balance.')
-                    return self.exit_codes.ERROR_CHARGE_BALANCE
-                for species in composition:
-                    if np.abs(composition[species]/composition_ref[species] - 1.0) > float(self.inputs.stoichiometry_rel_tol):
-                        print('ERROR: Incorrect composition.')
-                        print('Composition Nm1: ', composition)
-                        print('Composition reference Nm1: ', composition_ref)                        
-                        return self.exit_codes.ERROR_COMPOSITION
+            composition_ref = copy.deepcopy(composition_ref_N)
+            composition_ref[str(self.inputs.mobile_species)] -= 1.0
+            self.ctx.structures_Nm1_dict = {}
+            i = -1
+            for j in range(len(self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN))):
+                if (type(self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
+                    i += 1
+                    key = 'structure_Nm1_%i' % i
+                    self.ctx.structures_Nm1_dict[key] = self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN)[j]
+                    structure_py = self.ctx.structures_Nm1_dict[key].get_pymatgen()
+                    composition = structure_py.composition.as_dict()
+                    total_charge = self.__total_charge(composition, self.ctx.charge_dict)
+                    if np.abs(total_charge + self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
+                        print('ERROR: Incorrect charge balance.')
+                        return self.exit_codes.ERROR_CHARGE_BALANCE
+                    for species in composition:
+                        if np.abs(composition[species]/composition_ref[species] - 1.0) > \
+                        float(self.inputs.stoichiometry_rel_tol):
+                            print('ERROR: Incorrect composition.')
+                            print('Composition Nm1: ', composition)
+                            print('Composition reference Nm1: ', composition_ref)                        
+                            return self.exit_codes.ERROR_COMPOSITION
                     
             
     def run_calc(self):
