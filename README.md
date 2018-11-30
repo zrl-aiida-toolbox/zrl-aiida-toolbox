@@ -104,14 +104,19 @@ assuming point-charge particles using a Monte-Carlo approach.
 The `parameters` input expects the following parameters:
 - charges `{str: float}`: a dictionary containing the charges to be used for the energy 
   calculation
-- vacancy `str`: the symbol of the element to be used as vacancy. By default, the workchain 
+- vacancy_ion `str`: the symbol of the element to be used as vacancy. By default, the workchain 
   uses `Lr`. This does not need to be changed unless there is a conflict.
-- pick_conf_every `int`: the number of steps between two structures being selected.
-- n_rounds `int`: the maximum number of rounds to execute, each round corresponding to 
-  the pick of one structure.
-- n_conf_target `int`: the number of realizations requested. The workchain will
-  always return at most the requested number of generated structures.
-- temperature `float`: effective temperature for the Monte-Carlo selection.
+- n_conf_target `int`: the number of realizations requested. The workchain will always return at
+  most the requested number of generated structures (default: 1).
+- equilibration `int`: the number of steps used to equilibrate before the sampling (default: 10).
+- pick_conf_every `int`: the number of steps between two structures being selected (default: 100).
+- n_rounds `int`: the maximum number of rounds to execute, each round corresponding to the pick of
+  one structure (default: `equilibration` + `pick_conf_every` + 10).
+- temperature `float`: effective temperature for the Monte-Carlo selection (default: 1000).
+- return_unique `bool`: flag controlling whether a structure can be returned multiple times 
+  (default: True).
+- selection `str`: selection method of the output structures. Options are *reservoir sampling* and *last* 
+  (default: *reservoir sampling*).
 
 ### <a name="zrl-utils-shake"></a>ShakeWorkChain (*zrl.utils.shake*)
 
