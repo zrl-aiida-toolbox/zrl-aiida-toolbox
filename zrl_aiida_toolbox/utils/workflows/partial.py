@@ -206,7 +206,7 @@ class PartialOccupancyWorkChain(WorkChain):
             hash = structure.get_hash()
             if len(self.ctx.configurations) < self.ctx.n_conf_target:
                 if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
-                    self.ctx.configurations += (structure, )
+                    self.ctx.configurations += (structure.get_pymatgen(), )
                     self.ctx.configuration_hashes += (hash, )
             else:
                 if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
@@ -215,13 +215,13 @@ class PartialOccupancyWorkChain(WorkChain):
                         keep = r < self.ctx.n_conf_target
                         if keep:
                             self.ctx.configurations = self.ctx.configurations[:r] \
-                                + (structure, ) \
+                                + (structure.get_pymatgen(), ) \
                                 + self.ctx.configurations[r + 1:]
                             self.ctx.configuration_hashes = self.ctx.configuration_hashes[:r] \
                                 + (hash, ) \
                                 + self.ctx.configuration_hashes[r + 1:]
                     elif self.ctx.selection == 1:
-                        self.ctx.configurations = (structure, ) + self.ctx.configurations[-self.ctx.n_conf_target + 1:]
+                        self.ctx.configurations = (structure.get_pymatgen(), ) + self.ctx.configurations[-self.ctx.n_conf_target + 1:]
                         self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[-self.ctx.n_conf_target + 1:]
 
         if self.inputs.verbose:
@@ -230,6 +230,7 @@ class PartialOccupancyWorkChain(WorkChain):
     def finalize(self):
         if 'configurations' in self.ctx:
             for structure in self.ctx.configurations:
+                structure = StructureData(pymatgen=structure)
                 self.out('structures.%s' % structure.uuid, structure) 
             energy = ArrayData()
             energy.set_array('energy', np.array(self.ctx.energy))
@@ -287,8 +288,10 @@ class PartialOccupancyWorkChain(WorkChain):
     
     def __get_structure(self):
         structure = Structure.from_sites(self.ctx.static
-                                         + sum([list(filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value,
-                                                            value)) for value in self.ctx.sites.values()], []))
+                                         + sum([[v
+                                                 for v in value
+                                                 if v.specie.element.value != self.ctx.vacancy.element.value]
+                                                for value in self.ctx.sites.values()], []))
         structure.sort()
         return StructureData(pymatgen=structure)
                 
