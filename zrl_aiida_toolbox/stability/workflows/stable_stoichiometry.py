@@ -169,14 +169,11 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_structures_MC(self):
         parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
                           selection='last',
-                          n_rounds=400,
+                          n_rounds=10,
                           pick_conf_every=1,
                           n_conf_target=1))
         
         futures = {}
-        print('before')
-        print(self.inputs.num_configurations.value)
-        print('loop')
         for i in range(self.inputs.num_configurations.value):
             print(i)
             future = self.submit(PartialOccupancyWorkChain,
