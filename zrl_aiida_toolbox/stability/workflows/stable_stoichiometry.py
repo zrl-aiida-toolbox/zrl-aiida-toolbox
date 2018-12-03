@@ -169,7 +169,7 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_structures_MC(self):
         parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
                           selection='last',
-                          n_rounds=10,
+                          n_rounds=1,
                           pick_conf_every=1,
                           n_conf_target=1))
         
@@ -199,17 +199,23 @@ class StableStoichiometryWorkchain(WorkChain):
         structure_py_ref = self.ctx.structure_input_N.get_pymatgen()
         composition_ref_N = structure_py_ref.composition.as_dict()
         
-        composition_ref = copy.deepcopy(composition_ref_N)
         self.ctx.structures_N_dict = {}
-        i = -1
+        self.ctx.structures_Np1_dict = {}
+        self.ctx.structures_Nm1_dict = {}
+        
+        i_N = -1
+        i_Np1 = -1
+        i_Nm1 = -1
         for k in range(self.inputs.num_configurations.value):
             self.ctx.structures_N = self.ctx['N-%d' % k]
             self.ctx.structures_Np1 = self.ctx['Np1-%d' % k]
             self.ctx.structures_Nm1 = self.ctx['Nm1-%d' % k]
             
+            composition_ref = copy.deepcopy(composition_ref_N)
             for j in range(len(self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN))):
                 if (type(self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
-                    i += 1
+                    i_N += 1
+                    i = i_N
                     key = 'structure_N_%i' % i
                     self.ctx.structures_N_dict[key] = self.ctx.structures_N.get_outputs(link_type=LinkType.RETURN)[j]
                     structure_py = self.ctx.structures_N_dict[key].get_pymatgen()
@@ -228,11 +234,10 @@ class StableStoichiometryWorkchain(WorkChain):
                         
             composition_ref = copy.deepcopy(composition_ref_N)
             composition_ref[str(self.inputs.mobile_species)] += 1.0
-            self.ctx.structures_Np1_dict = {}
-            i = -1
             for j in range(len(self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN))):
                 if (type(self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
-                    i += 1
+                    i_Np1 += 1
+                    i = i_Np1
                     key = 'structure_Np1_%i' % i
                     self.ctx.structures_Np1_dict[key] = self.ctx.structures_Np1.get_outputs(link_type=LinkType.RETURN)[j]
                     structure_py = self.ctx.structures_Np1_dict[key].get_pymatgen()
@@ -251,11 +256,10 @@ class StableStoichiometryWorkchain(WorkChain):
                         
             composition_ref = copy.deepcopy(composition_ref_N)
             composition_ref[str(self.inputs.mobile_species)] -= 1.0
-            self.ctx.structures_Nm1_dict = {}
-            i = -1
             for j in range(len(self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN))):
                 if (type(self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN)[j]) == StructureData):
-                    i += 1
+                    i_Nm1 += 1
+                    i = i_Nm1
                     key = 'structure_Nm1_%i' % i
                     self.ctx.structures_Nm1_dict[key] = self.ctx.structures_Nm1.get_outputs(link_type=LinkType.RETURN)[j]
                     structure_py = self.ctx.structures_Nm1_dict[key].get_pymatgen()
