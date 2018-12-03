@@ -182,7 +182,7 @@ class PartialOccupancyWorkChain(WorkChain):
             self.report('Starting structure: E = %f' % self.ctx.energy[-1])
 
     def do_rounds(self):
-        return self.ctx.round < self.ctx.n_rounds and self.ctx.do_break > 0
+        return self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0
     
     def round(self):
         swaps = 0
