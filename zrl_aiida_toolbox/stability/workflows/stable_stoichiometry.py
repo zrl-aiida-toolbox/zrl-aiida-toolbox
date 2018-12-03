@@ -112,8 +112,8 @@ class StableStoichiometryWorkchain(WorkChain):
             replicate_times = max([replicate_times, np.ceil(max_error_current/float(self.inputs.stoichiometry_rel_tol))])
         
         volume_target = replicate_times * self.ctx.structure_input.get_cell_volume()
-        volume_target = max([self.inputs.min_cell_volume, volume_target])
-        volume_target = min([self.inputs.max_cell_volume, volume_target])
+        volume_target = max([self.inputs.min_cell_volume.value, volume_target])
+        volume_target = min([self.inputs.max_cell_volume.value, volume_target])
         
         a, b, c = self.__calculate_factors(volume_target, self.ctx.structure_input.cell)
         self.ctx.structure_input_supercell = StructureData(pymatgen=self.ctx.structure_input.get_pymatgen() \
@@ -169,7 +169,7 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_structures_MC(self):
         parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
                           selection='last',
-                          n_rounds=1,
+                          n_rounds=20,
                           pick_conf_every=1,
                           n_conf_target=1))
         
