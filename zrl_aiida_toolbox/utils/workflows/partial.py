@@ -221,8 +221,9 @@ class PartialOccupancyWorkChain(WorkChain):
                                 + (hash, ) \
                                 + self.ctx.configuration_hashes[r + 1:]
                     elif self.ctx.selection == 1:
-                        self.ctx.configurations = (structure.get_pymatgen(), ) + self.ctx.configurations[-self.ctx.n_conf_target + 1:]
-                        self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[-self.ctx.n_conf_target + 1:]
+                        idx = len(self.ctx.configurations) - self.ctx.n_conf_target + 1
+                        self.ctx.configurations = (structure.get_pymatgen(), ) + self.ctx.configurations[idx:]
+                        self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[idx:]
 
         if self.inputs.verbose:
             self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], swaps))
