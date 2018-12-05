@@ -82,7 +82,7 @@ class StableStoichiometryWorkchain(WorkChain):
 
  
     def sampling_method_is_MC(self):
-        return self.inputs.conf_sampling_method.value == 'sampling_method_MC'
+        return self.ctx.conf_sampling_method.value == 'sampling_method_MC'
 
     
     def no_sampling_method(self):
@@ -102,6 +102,11 @@ class StableStoichiometryWorkchain(WorkChain):
         if ('input_structure_aiida' in self.inputs):
             self.ctx.structure_input = self.inputs.input_structure_aiida
         self.ctx.charge_dict = self.inputs.sampling_charges.get_dict()['charges']
+        self.ctx.conf_sampling_method = self.inputs.conf_sampling_method
+        self.ctx.stoichiometry_rel_tol = self.inputs.stoichiometry_rel_tol
+        self.ctx.min_cell_volume = self.inputs.min_cell_volume
+        self.ctx.max_cell_volume = self.inputs.max_cell_volume
+        self.ctx.mobile_species = self.inputs.mobile_species
         
     def generate_supercell(self):
         structure_py = self.ctx.structure_input.get_pymatgen()
@@ -109,11 +114,11 @@ class StableStoichiometryWorkchain(WorkChain):
         replicate_times = 1
         for species in input_composition:
             max_error_current = 0.5/input_composition[species]
-            replicate_times = max([replicate_times, np.ceil(max_error_current/float(self.inputs.stoichiometry_rel_tol))])
+            replicate_times = max([replicate_times, np.ceil(max_error_current/float(self.ctx.stoichiometry_rel_tol))])
         
         volume_target = replicate_times * self.ctx.structure_input.get_cell_volume()
-        volume_target = max([self.inputs.min_cell_volume.value, volume_target])
-        volume_target = min([self.inputs.max_cell_volume.value, volume_target])
+        volume_target = max([self.ctx.min_cell_volume.value, volume_target])
+        volume_target = min([self.ctx.max_cell_volume.value, volume_target])
         
         a, b, c = self.__calculate_factors(volume_target, self.ctx.structure_input.cell)
         self.ctx.structure_input_supercell = StructureData(pymatgen=self.ctx.structure_input.get_pymatgen() \
@@ -131,10 +136,10 @@ class StableStoichiometryWorkchain(WorkChain):
         structure_py = self.ctx.structure_input_supercell.get_pymatgen()
         input_supercell_composition = structure_py.composition.as_dict()
         input_supercell_total_charge = self.__total_charge(input_supercell_composition, self.ctx.charge_dict)
-        delta_N = -input_supercell_total_charge / self.ctx.charge_dict[str(self.inputs.mobile_species)]
+        delta_N = -input_supercell_total_charge / self.ctx.charge_dict[str(self.ctx.mobile_species)]
         structure_input_supercell_balanced = self.submit(ChangeStoichiometryWorkChain, 
                                                           structure=self.ctx.structure_input_supercell, 
-                                                          species=self.inputs.mobile_species, 
+                                                          species=self.ctx.mobile_species, 
                                                           delta_N=Float(delta_N), 
                                                           distribution=Str('aufbau'))
         return ToContext(structure_input_supercell_balanced=structure_input_supercell_balanced)
@@ -144,7 +149,7 @@ class StableStoichiometryWorkchain(WorkChain):
         self.ctx.structure_input_N = self.ctx.structure_input_supercell_balanced.get_outputs_dict()['structure_changed']
         structure_input_Np1_future = self.submit(ChangeStoichiometryWorkChain, 
                                           structure=self.ctx.structure_input_N, 
-                                          species=self.inputs.mobile_species, 
+                                          species=self.ctx.mobile_species, 
                                           delta_N=Float(1.0), 
                                           distribution=Str('aufbau'))
         

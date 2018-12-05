@@ -31,11 +31,13 @@ class ReplicateWorkChain(WorkChain):
         self.ctx.a = int(parameter_dict.get('a')) if 'a' in parameter_dict else None
         self.ctx.b = int(parameter_dict.get('b')) if 'b' in parameter_dict else None
         self.ctx.c = int(parameter_dict.get('c')) if 'c' in parameter_dict else None
-        self.ctx.max_electrons = int(parameter_dict.get('max_electrons')) if 'max_electrons' in parameter_dict else None
         self.ctx.val_electrons = {
             key: int(value) for key, value in parameter_dict.get('val_electrons', {}).items()
         }
+        
+        self.ctx.max_electrons = int(parameter_dict.get('max_electrons')) if 'max_electrons' in parameter_dict else None
         self.ctx.max_volume = float(parameter_dict.get('max_volume')) if 'max_volume' in parameter_dict else None
+        
         self.ctx.structure = self.inputs.structure.get_pymatgen()
 
         assert self.ctx.a and self.ctx.b and self.ctx.c \
