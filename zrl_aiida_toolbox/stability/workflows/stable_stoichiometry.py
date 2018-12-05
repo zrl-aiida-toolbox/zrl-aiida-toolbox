@@ -169,7 +169,7 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_structures_MC(self):
         parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
                           selection='last',
-                          n_rounds=20,
+                          n_rounds=200,
                           pick_conf_every=1,
                           n_conf_target=1))
         
