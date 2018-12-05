@@ -75,12 +75,12 @@ class ReplicateWorkChain(WorkChain):
 
         if max_volume:
             replicas = self.__calculate_factors(target_volume=max_volume, 
-                                                                          cell_matrix=self.ctx.structure.lattice.matrix, 
-                                                                          as_max=True)
+                                                cell_matrix=self.ctx.structure.lattice.matrix, 
+                                                as_max=True)
         if min_volume:
             replicas = self.__calculate_factors(target_volume=min_volume, 
-                                                                          cell_matrix=self.ctx.structure.lattice.matrix, 
-                                                                          as_max=False)
+                                                cell_matrix=self.ctx.structure.lattice.matrix, 
+                                                as_max=False)
         
         replicas[np.where(replicas == 0)] = 1
         self.ctx.a, self.ctx.b, self.ctx.c = replicas
@@ -105,6 +105,8 @@ class ReplicateWorkChain(WorkChain):
             factors = np.floor(target_factors).astype(int)
             sign = 1
         
+        factors[np.where(factors == 0)] = 1
+        
         new_cell_matrix = []
         cell_lengths_new = []
         for i in [0,1,2]:
@@ -122,6 +124,7 @@ class ReplicateWorkChain(WorkChain):
                     change_side = i
                     edge_difference = edge_difference_test
             factors[change_side] += sign
+            factors[np.where(factors == 0)] = 1
             for i in [0,1,2]:
                 new_cell_matrix[i] = np.array(cell_matrix[i])*factors[i]
                 cell_lengths_new[i] = np.linalg.norm(new_cell_matrix[i])

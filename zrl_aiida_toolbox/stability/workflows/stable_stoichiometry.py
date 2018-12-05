@@ -120,19 +120,13 @@ class StableStoichiometryWorkchain(WorkChain):
         volume_target = max([self.ctx.min_cell_volume.value, volume_target])
         volume_target = min([self.ctx.max_cell_volume.value, volume_target])
         
-        a, b, c = self.__calculate_factors(volume_target, self.ctx.structure_input.cell)
-        self.ctx.structure_input_supercell = StructureData(pymatgen=self.ctx.structure_input.get_pymatgen() \
-                                                                       * np.array([a, b, c], dtype=int))
-    
-    
-#     def enforce_integer_composition(self):
-#         structure_py = self.ctx.structure_input_supercell.get_pymatgen()
-#         composition = self.ctx.structure_input_supercell.get_composition()
-#         for species in composition:
-#             delta_N = np.round(composition[species]) - composition[species]
-
+        structure_input_supercell_future = self.submit(ReplicateWorkChain, 
+                                                          structure=self.ctx.structure_input, 
+                                                          parameters=ParameterData(dict=dict(min_volume=volume_target)))
+        return ToContext(structure_input_supercell_result=structure_input_supercell_future)
 
     def enforce_charge_balance(self):
+        self.ctx.structure_input_supercell = self.ctx.structure_input_supercell_result.get_outputs_dict()['structure']
         structure_py = self.ctx.structure_input_supercell.get_pymatgen()
         input_supercell_composition = structure_py.composition.as_dict()
         input_supercell_total_charge = self.__total_charge(input_supercell_composition, self.ctx.charge_dict)
@@ -174,7 +168,7 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_structures_MC(self):
         parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
                           selection='last',
-                          n_rounds=200,
+                          n_rounds=1,
                           pick_conf_every=1,
                           n_conf_target=1))
         
