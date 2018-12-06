@@ -31,9 +31,10 @@ class PartialOccupancyWorkChain(WorkChain):
         spec.outline(
             cls.validate_inputs,
             cls.initialize,
-            while_(cls.do_rounds)(
-                cls.round
-            ),
+#             while_(cls.do_rounds)(
+#                 cls.round
+#             ),
+            cls.round,
             cls.finalize
         )
 
@@ -154,22 +155,35 @@ class PartialOccupancyWorkChain(WorkChain):
         
         self.ctx.configurations = tuple()
         self.ctx.configuration_hashes = tuple()
-        # self.ctx.sites = dict()
         
         for comp in partial_counts:
-            tmp = np.math.factorial(len(self.ctx.partial.get(comp)[-1]))
+            # For each site, calculate log10 of the multinomial factor,
+            # it will be used to scale the probability of each site to 
+            # be used for a swap.
+            n = 0
+            for i in range(len(self.ctx.partial.get(comp)[-1])):
+                n += np.log10(i + 1)
+                
             for i, sp in enumerate(comp):
-                tmp /= np.math.factorial(int(partial_counts.get(comp)[i][0]))
+                for j in range(int(partial_counts.get(comp)[i][0])):
+                    n -= np.log10(j + 1)
+                    
                 for _ in range(int(partial_counts.get(comp)[i][0])):
                     site = self.ctx.partial.get(comp)[-1].pop(0)
                     self.ctx.partial.get(comp).insert(0, PeriodicSite(Specie(sp, self.ctx.charges.get(sp.value, 0)), 
                                                                       site.coords, site.lattice, True, True))
             leftovers = self.ctx.partial.get(comp).pop()
-            tmp /= np.math.factorial(len(leftovers))
+            
+            self.report((n, type(n)))
+            for j in range(len(leftovers)):
+                n -= np.log10(j + 1)
+            self.report((n, type(n)))
+            
             for site in leftovers:
                 self.ctx.partial.get(comp).insert(0, PeriodicSite(self.ctx.vacancy, 
                                                                   site.coords, site.lattice, True, True))
-            for _ in range(np.ceil(np.log10(tmp)).astype(int)):
+
+            for _ in range(np.ceil(n).astype(int)):
                 self.ctx.select.append(comp)
                                 
         self.ctx.idxes = [idx for idx in range(len(self.ctx.select))]
@@ -185,48 +199,49 @@ class PartialOccupancyWorkChain(WorkChain):
         return self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0
     
     def round(self):
-        swaps = 0
-        
-        for i in range(self.ctx.pick_conf_every):
-            new_sites = self.ctx.sites
-            for _ in range(1):
-                new_sites = self.__swap(new_sites)
-                                    
-            energy, swapped = self.__keep(new_sites)
-            swaps += swapped
-        
-        self.ctx.energy.append(energy)
-        
-        self.ctx.round += 1
-        if self.ctx.round > self.ctx.equilibration:
-            # Implementation of a reservoir sampling selection after the equilibration steps
-            # All structures generated after the equilibration steps have the same probability
-            # of being retured.
-            structure = self.__get_structure()
-            hash = structure.get_hash()
-            if len(self.ctx.configurations) < self.ctx.n_conf_target:
-                if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
-                    self.ctx.configurations += (structure.get_pymatgen(), )
-                    self.ctx.configuration_hashes += (hash, )
-            else:
-                if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
-                    if self.ctx.selection == 0:
-                        r = self.ctx.rs.randint(2**31 - 1) % (self.ctx.round - self.ctx.equilibration)
-                        keep = r < self.ctx.n_conf_target
-                        if keep:
-                            self.ctx.configurations = self.ctx.configurations[:r] \
-                                + (structure.get_pymatgen(), ) \
-                                + self.ctx.configurations[r + 1:]
-                            self.ctx.configuration_hashes = self.ctx.configuration_hashes[:r] \
-                                + (hash, ) \
-                                + self.ctx.configuration_hashes[r + 1:]
-                    elif self.ctx.selection == 1:
-                        idx = len(self.ctx.configurations) - self.ctx.n_conf_target + 1
-                        self.ctx.configurations = (structure.get_pymatgen(), ) + self.ctx.configurations[idx:]
-                        self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[idx:]
+        while self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0:
+            swaps = 0
 
-        if self.inputs.verbose:
-            self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], swaps))
+            for i in range(self.ctx.pick_conf_every):
+                new_sites = self.ctx.sites
+                for _ in range(1):
+                    new_sites = self.__swap(new_sites)
+
+                energy, swapped = self.__keep(new_sites)
+                swaps += swapped
+
+            self.ctx.energy.append(energy)
+
+            self.ctx.round += 1
+            if self.ctx.round > self.ctx.equilibration:
+                # Implementation of a reservoir sampling selection after the equilibration steps
+                # All structures generated after the equilibration steps have the same probability
+                # of being retured.
+                structure = self.__get_structure()
+                hash = structure.get_hash()
+                if len(self.ctx.configurations) < self.ctx.n_conf_target:
+                    if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
+                        self.ctx.configurations += (structure.get_pymatgen(), )
+                        self.ctx.configuration_hashes += (hash, )
+                else:
+                    if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
+                        if self.ctx.selection == 0:
+                            r = self.ctx.rs.randint(2**31 - 1) % (self.ctx.round - self.ctx.equilibration)
+                            keep = r < self.ctx.n_conf_target
+                            if keep:
+                                self.ctx.configurations = self.ctx.configurations[:r] \
+                                    + (structure.get_pymatgen(), ) \
+                                    + self.ctx.configurations[r + 1:]
+                                self.ctx.configuration_hashes = self.ctx.configuration_hashes[:r] \
+                                    + (hash, ) \
+                                    + self.ctx.configuration_hashes[r + 1:]
+                        elif self.ctx.selection == 1:
+                            idx = len(self.ctx.configurations) - self.ctx.n_conf_target + 1
+                            self.ctx.configurations = (structure.get_pymatgen(), ) + self.ctx.configurations[idx:]
+                            self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[idx:]
+
+            if self.inputs.verbose:
+                self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], swaps))
                     
     def finalize(self):
         if 'configurations' in self.ctx:
