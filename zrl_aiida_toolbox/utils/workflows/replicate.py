@@ -132,4 +132,4 @@ class ReplicateWorkChain(WorkChain):
             if n_round >= 10:
                 break
  
-        return list(factors)
+        return factors

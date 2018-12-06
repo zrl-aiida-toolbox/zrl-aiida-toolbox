@@ -111,10 +111,10 @@ class StableStoichiometryWorkchain(WorkChain):
     def generate_supercell(self):
         structure_py = self.ctx.structure_input.get_pymatgen()
         input_composition = structure_py.composition.as_dict()
-        replicate_times = 1
+        replicate_times = 1.0
         for species in input_composition:
             max_error_current = 0.5/input_composition[species]
-            replicate_times = max([replicate_times, np.ceil(max_error_current/float(self.ctx.stoichiometry_rel_tol))])
+            replicate_times = max([replicate_times, max_error_current/float(self.ctx.stoichiometry_rel_tol)])
         
         volume_target = replicate_times * self.ctx.structure_input.get_cell_volume()
         volume_target = max([self.ctx.min_cell_volume.value, volume_target])
