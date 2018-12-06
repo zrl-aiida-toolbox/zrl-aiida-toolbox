@@ -8,7 +8,7 @@ from pymatgen.io.cif import CifParser
 from pymatgen.core.structure import Structure
 
 import numpy as np
-import copy
+import copy, itertools
 
 Str = DataFactory('str')
 Float = DataFactory('float')
@@ -21,17 +21,15 @@ ParameterData = DataFactory('parameter')
 KpointsData = DataFactory('array.kpoints')
 
 from zrl_aiida_toolbox.utils.workflows.change_stoichio import ChangeStoichiometryWorkChain
-from zrl_aiida_toolbox.utils.workflows.partial import PartialOccupancyWorkChain
-from zrl_aiida_toolbox.stability.workflows.energy_calculation import EnergyWorkchain
-from zrl_aiida_toolbox.utils.workflows.replicate import ReplicateWorkChain
-
+PartialOccupancyWorkChain = WorkflowFactory('zrl.utils.partial_occ')
+ReplicateWorkChain = WorkflowFactory('zrl.utils.replicate')
 
 # Think about different name: RedoxPotentialsWorkChain
-class StableStoichiometryWorkchain(WorkChain):
+class StableStoichiometryWorkChain(WorkChain):
     
     @classmethod
     def define(cls, spec):    
-        super(StableStoichiometryWorkchain, cls).define(spec)
+        super(StableStoichiometryWorkChain, cls).define(spec)
         
         spec.input('input_cif_file_name', valid_type=Str, required=False)
         spec.input('input_structure_aiida', valid_type=StructureData, required=False)
@@ -44,42 +42,55 @@ class StableStoichiometryWorkchain(WorkChain):
         spec.input('min_cell_volume', valid_type=Float, default=Float(1000.0), required=False)
         spec.input('max_cell_volume', valid_type=Float, default=Float(10000.0), required=False)
         spec.input('verbose', valid_type=Bool, default=Bool(False), required=False)
+        
+        spec.input('partial_occ_parameters', valid_type=ParameterData, 
+                   default=ParameterData(dict=dict(selection='last', n_rounds=200, 
+                                                   pick_conf_every=1, n_conf_target=1)))
+        
+        spec.input_namespace('energy', dynamic=True)
+        spec.input('energy.code', valid_type=Code, required=True)
+        spec.input('energy.workchain', valid_type=Str, required=True)
+        spec.input('energy.options', valid_type=ParameterData, required=True)
 
         spec.outline(
             cls.process_inputs,
             cls.generate_supercell,
-#             cls.enforce_integer_composition,
+            # cls.enforce_integer_composition,
             cls.enforce_charge_balance,
             cls.generate_stoichiometries,
-            cls.process_structures,
+            # cls.process_structures,
             if_(cls.sampling_method_is_MC)(
-                cls.generate_structures_MC,
+                while_(cls.parse_MC)(
+                    cls.execute_MC
+                )
             ).else_(
                 cls.no_sampling_method,
             ),
             cls.check_charges_composition,
             cls.run_calc,
-#            cls.compute_potentials,
-            cls.set_output
+            cls.compute_potentials,
+            # cls.set_output
         )
 
-        spec.output('structure_N', valid_type=StructureData)
-        spec.output('structure_Np1', valid_type=StructureData)
-        spec.output('structure_Nm1', valid_type=StructureData)
-        spec.output_namespace('structures_N', valid_type=StructureData, dynamic=True)
-        spec.output_namespace('structures_Np1', valid_type=StructureData, dynamic=True)
-        spec.output_namespace('structures_Nm1', valid_type=StructureData, dynamic=True)
+        # spec.output('structure_N', valid_type=StructureData)
+        # spec.output('structure_Np1', valid_type=StructureData)
+        # spec.output('structure_Nm1', valid_type=StructureData)
+        # spec.output_namespace('structures_N', valid_type=StructureData, dynamic=True)
+        # spec.output_namespace('structures_Np1', valid_type=StructureData, dynamic=True)
+        # spec.output_namespace('structures_Nm1', valid_type=StructureData, dynamic=True)
 
-#        spec.output_namespace('test', valid_type=Float, dynamic=True)
-#        spec.output('phi_red', valid_type=Float)
-#        spec.output('phi_ox', valid_type=Float)
+        # spec.output_namespace('test', valid_type=Float, dynamic=True)
+        
+        spec.output('phi_red', valid_type=Float)
+        spec.output('phi_ox', valid_type=Float)
 
         spec.exit_code(1, 'ERROR_MISSING_INPUT_STRUCURE', 'Missing input structure or .cif file.')
         spec.exit_code(2, 'ERROR_AMBIGUOUS_INPUT_STRUCURE', 'More than one input structure or .cif file provided.')
         spec.exit_code(3, 'ERROR_MISSING_SAMPLING_METHOD', 'No valid structure sampling method provided.')
         spec.exit_code(4, 'ERROR_CHARGE_BALANCE', 'Incorrect charge balance.')
         spec.exit_code(5, 'ERROR_ERROR_COMPOSITION', 'Incorrect composition.')
-
+        spec.exit_code(6, 'ERROR_ENERGY_WORKCHAIN_WITHOUT_PARAMETER_OUTPUT', 
+                       'The provided energy workchain does not return a ParameterData object')
  
     def sampling_method_is_MC(self):
         return self.inputs.conf_sampling_method.value == 'sampling_method_MC'
@@ -103,6 +114,32 @@ class StableStoichiometryWorkchain(WorkChain):
             self.ctx.structure_input = self.inputs.input_structure_aiida
         self.ctx.charge_dict = self.inputs.sampling_charges.get_dict()['charges']
         
+        partial_input_dict = self.inputs.partial_occ_parameters.get_dict()
+        partial_input_dict['charges'] = self.ctx.charge_dict
+        partial_input_dict.setdefault('return_unique', True)
+        self.ctx.partial_input = ParameterData(dict=partial_input_dict)
+        
+        self.ctx.energy_workflow = WorkflowFactory(self.inputs.energy.workchain.value)
+        if not any([
+            "<class 'aiida.orm.data.parameter.ParameterData'>" == p.get('valid_type')
+            for p in self.ctx.energy_workflow.get_description().get('spec').get('outputs').values()
+        ]):
+            return self.exit_codes.ERROR_ENERGY_WORKCHAIN_WITHOUT_PARAMETER_OUTPUT
+        
+        self.ctx.energy_input = {}
+        for name, input_dict in self.ctx.energy_workflow.get_description().get('spec').get('inputs').items():
+            if name in self.inputs.energy and \
+               input_dict.get('valid_type') == str(self.inputs.energy[name].__class__):
+                self.ctx.energy_input[name] = self.inputs.energy[name]
+        
+        self.ctx.structures_N = []
+        self.ctx.structures_Np = []
+        self.ctx.structures_Nm = []
+        
+        self.ctx.hashes_N = []
+        self.ctx.hashes_Np = []
+        self.ctx.hashes_Nm = []
+        
     def generate_supercell(self):
         structure_py = self.ctx.structure_input.get_pymatgen()
         input_composition = structure_py.composition.as_dict()
@@ -116,8 +153,8 @@ class StableStoichiometryWorkchain(WorkChain):
         volume_target = min([self.inputs.max_cell_volume.value, volume_target])
         
         a, b, c = self.__calculate_factors(volume_target, self.ctx.structure_input.cell)
-        self.ctx.structure_input_supercell = StructureData(pymatgen=self.ctx.structure_input.get_pymatgen() \
-                                                                       * np.array([a, b, c], dtype=int))
+        self.ctx.supercell = pymatgen=self.ctx.structure_input.get_pymatgen() * np.array([a, b, c], dtype=int
+        )
     
     
 #     def enforce_integer_composition(self):
@@ -126,82 +163,92 @@ class StableStoichiometryWorkchain(WorkChain):
 #         for species in composition:
 #             delta_N = np.round(composition[species]) - composition[species]
 
-
     def enforce_charge_balance(self):
-        structure_py = self.ctx.structure_input_supercell.get_pymatgen()
-        input_supercell_composition = structure_py.composition.as_dict()
-        input_supercell_total_charge = self.__total_charge(input_supercell_composition, self.ctx.charge_dict)
-        delta_N = -input_supercell_total_charge / self.ctx.charge_dict[str(self.inputs.mobile_species)]
-        structure_input_supercell_balanced = self.submit(ChangeStoichiometryWorkChain, 
-                                                          structure=self.ctx.structure_input_supercell, 
-                                                          species=self.inputs.mobile_species, 
-                                                          delta_N=Float(delta_N), 
-                                                          distribution=Str('aufbau'))
-        return ToContext(structure_input_supercell_balanced=structure_input_supercell_balanced)
+        supercell_composition = self.ctx.supercell.composition.as_dict()
+        supercell_total_charge = self.__total_charge(supercell_composition, self.ctx.charge_dict)
+        delta_N = - supercell_total_charge / self.ctx.charge_dict[str(self.inputs.mobile_species)]
+        
+        supercell_balanced = self.submit(ChangeStoichiometryWorkChain, 
+                                         structure=self.ctx.supercell, 
+                                         species=self.inputs.mobile_species, 
+                                         delta_N=Float(delta_N), 
+                                         distribution=Str('aufbau'))
+        
+        return ToContext(supercell_balanced=supercell_balanced)
 
      
     def generate_stoichiometries(self):
-        self.ctx.structure_input_N = self.ctx.structure_input_supercell_balanced.get_outputs_dict()['structure_changed']
-        structure_input_Np1_future = self.submit(ChangeStoichiometryWorkChain, 
-                                          structure=self.ctx.structure_input_N, 
-                                          species=self.inputs.mobile_species, 
-                                          delta_N=Float(1.0), 
-                                          distribution=Str('aufbau'))
+        self.ctx.supercell_N = self.ctx.supercell_balanced.get_outputs(StructureData, link_type=LinkType.RETURN)[0]
         
-        structure_input_Nm1_future = self.submit(ChangeStoichiometryWorkChain, 
-                                          structure=self.ctx.structure_input_N, 
-                                          species=self.inputs.mobile_species, 
-                                          delta_N=Float(-1.0), 
-                                          distribution=Str('aufbau'))
+        supercell_Np = self.submit(ChangeStoichiometryWorkChain, 
+                                   structure=self.ctx.supercell_N, 
+                                   species=self.inputs.mobile_species, 
+                                   delta_N=Float(1.0), 
+                                   distribution=Str('aufbau'))
         
-        return ToContext(structure_input_Np1_result=structure_input_Np1_future,
-                         structure_input_Nm1_result=structure_input_Nm1_future)
+        supercell_Nm = self.submit(ChangeStoichiometryWorkChain, 
+                                   structure=self.ctx.supercell_N, 
+                                   species=self.inputs.mobile_species, 
+                                   delta_N=Float(-1.0), 
+                                   distribution=Str('aufbau'))
+        
+        return ToContext(supercell_Np=supercell_Np,
+                         supercell_Nm=supercell_Nm)
     
     
     def process_structures(self):
-        self.ctx.structure_input_Np1 = self.ctx.structure_input_Np1_result.get_outputs_dict()['structure_changed']
-        self.ctx.structure_input_Nm1 = self.ctx.structure_input_Nm1_result.get_outputs_dict()['structure_changed']
-        self.out('structure_N', self.ctx.structure_input_N)
-        self.out('structure_Np1', self.ctx.structure_input_Np1)
-        self.out('structure_Nm1', self.ctx.structure_input_Nm1)
-    
-    
-    def generate_structures_MC(self):
-        parameters = ParameterData(dict=dict(charges=self.ctx.charge_dict,
-                          selection='last',
-                          n_rounds=200,
-                          pick_conf_every=1,
-                          n_conf_target=1))
-        
+        pass
+        # self.out('structure_N', self.ctx.structure_input_N)
+        # self.out('structure_Np1', self.ctx.structure_input_Np1)
+        # self.out('structure_Nm1', self.ctx.structure_input_Nm1)
+       
+    def execute_MC(self):
         futures = {}
-        for i in range(self.inputs.num_configurations.value):
-            future = self.submit(PartialOccupancyWorkChain,
-                                 structure=self.ctx.structure_input_N,
-                                 parameters=parameters)
-            futures['N-%d' % i] = future
+        for i in range(self.inputs.num_configurations.value - len(self.ctx.structures_N)):            
+            futures['mc.N.%d' % i] = self.submit(PartialOccupancyWorkChain,
+                                                 structure=self.ctx.supercell_N,
+                                                 parameters=self.ctx.partial_input)
+            
+        for i in range(self.inputs.num_configurations.value - len(self.ctx.structures_Np)):
+            futures['mc.Np.%d' % i] = self.submit(PartialOccupancyWorkChain,
+                                                  structure=self.ctx.supercell_Np,
+                                                  parameters=self.ctx.partial_input)
 
-            future = self.submit(PartialOccupancyWorkChain,
-                                         structure=self.ctx.structure_input_Np1,
-                                         parameters=parameters)
-            futures['Np1-%d' % i] = future
-
-            future = self.submit(PartialOccupancyWorkChain,
-                                         structure=self.ctx.structure_input_Nm1,
-                                         parameters=parameters)
-            futures['Nm1-%d' % i] = future
-
+        for i in range(self.inputs.num_configurations.value - len(self.ctx.structures_Nm)):
+            futures['mc.Nm.%d' % i] = self.submit(PartialOccupancyWorkChain,
+                                                  structure=self.ctx.supercell_Nm,
+                                                  parameters=self.ctx.partial_input)
         return ToContext(**futures)
-#                          structures_Np1=structures_Np1_future,
-#                          structures_Nm1=structures_Nm1_future)
-
+    
+    def parse_MC(self):    
+        keys = ('Nm', 'N', 'Np')
+        for i in itertools.count():
+            if ('mc.N.%d' % i) not in self.ctx and ('mc.Nm.%d' % i) not in self.ctx and ('mc.Np.%d' % i) not in self.ctx:
+                break
+            # We parse any result in the context
+            for key in keys:
+                if ('mc.%s.%d' % (key, i)) in self.ctx:
+                    structures = self.ctx['mc.%s.%d' % (key, i)].get_outputs(StructureData, link_type=LinkType.RETURN)
+                    del self.ctx['mc.%s.%d' % (key, i)]
+                    for structure in structures:
+                        if len(self.ctx['structures_%s' % key]) == self.inputs.num_configurations.value:
+                            break
+                        if structure.get_hash() not in self.ctx['structures_%s' % key]:
+                            self.ctx['structures_%s' % key].append(structure)
+                            self.ctx['hashes_%s' % key].append(structure.get_hash())
+        # We continue the loop as long as any category (N, Nm, Np) has fewer than the target number
+        # of structure.
+        return any([len(self.ctx['structures_%s' % key]) < self.inputs.num_configurations.value])
     
     def check_charges_composition(self):
-        structure_py_ref = self.ctx.structure_input_N.get_pymatgen()
+        structure_py_ref = self.ctx.supercell_N.get_pymatgen()
         composition_ref_N = structure_py_ref.composition.as_dict()
         
         self.ctx.structures_N_dict = {}
         self.ctx.structures_Np1_dict = {}
         self.ctx.structures_Nm1_dict = {}
+        
+        # TODO : To be continued
         
         i_N = -1
         i_Np1 = -1
@@ -222,14 +269,14 @@ class StableStoichiometryWorkchain(WorkChain):
                     composition = structure_py.composition.as_dict()
                     total_charge = self.__total_charge(composition, self.ctx.charge_dict)
                     if np.abs(total_charge) > 0.001:
-                        print('ERROR: Incorrect charge balance.')
+                        self.report('ERROR: Incorrect charge balance.')
                         return self.exit_codes.ERROR_CHARGE_BALANCE
                     for species in composition:
                         if np.abs(composition[species]/composition_ref[species] - 1.0) > \
                             float(self.inputs.stoichiometry_rel_tol): 
-                            print('ERROR: Incorrect composition.')
-                            print('Composition N: ', composition)
-                            print('Composition reference N: ', composition_ref)
+                            self.report('ERROR: Incorrect composition.')
+                            self.report('Composition N: ', composition)
+                            self.report('Composition reference N: ', composition_ref)
                             return self.exit_codes.ERROR_COMPOSITION
                         
             composition_ref = copy.deepcopy(composition_ref_N)
@@ -244,14 +291,14 @@ class StableStoichiometryWorkchain(WorkChain):
                     composition = structure_py.composition.as_dict()
                     total_charge = self.__total_charge(composition, self.ctx.charge_dict)
                     if np.abs(total_charge - self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
-                        print('ERROR: Incorrect charge balance.')
+                        self.report('ERROR: Incorrect charge balance.')
                         return self.exit_codes.ERROR_CHARGE_BALANCE                
                     for species in composition:
                         if np.abs(composition[species]/composition_ref[species] - 1.0) > \
                             float(self.inputs.stoichiometry_rel_tol):
-                            print('ERROR: Incorrect composition.')
-                            print('Composition Np1: ', composition)
-                            print('Composition reference Np1: ', composition_ref)                        
+                            self.report('ERROR: Incorrect composition.')
+                            self.report('Composition Np1: ', composition)
+                            self.report('Composition reference Np1: ', composition_ref)                        
                             return self.exit_codes.ERROR_COMPOSITION
                         
             composition_ref = copy.deepcopy(composition_ref_N)
@@ -266,72 +313,72 @@ class StableStoichiometryWorkchain(WorkChain):
                     composition = structure_py.composition.as_dict()
                     total_charge = self.__total_charge(composition, self.ctx.charge_dict)
                     if np.abs(total_charge + self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
-                        print('ERROR: Incorrect charge balance.')
+                        self.report('ERROR: Incorrect charge balance.')
                         return self.exit_codes.ERROR_CHARGE_BALANCE
                     for species in composition:
                         if np.abs(composition[species]/composition_ref[species] - 1.0) > \
                         float(self.inputs.stoichiometry_rel_tol):
-                            print('ERROR: Incorrect composition.')
-                            print('Composition Nm1: ', composition)
-                            print('Composition reference Nm1: ', composition_ref)                        
+                            self.report('ERROR: Incorrect composition.')
+                            self.report('Composition Nm1: ', composition)
+                            self.report('Composition reference Nm1: ', composition_ref)                        
                             return self.exit_codes.ERROR_COMPOSITION
                     
             
     def run_calc(self):
-        settings = ParameterData(dict=dict(gamma_only=True))
-        pseudo = Str('SSSP_precision')
-        options = ParameterData(dict=dict(max_wallclock_seconds=3600,
-                                          resources=dict(num_machines=1),
-                                          queue_name='normal',
-                                          account='mr28',
-                                          custom_scheduler_commands='#SBATCH --constraint=mc'))
-        code = Code.get_from_string('QE_pw.x@daint')
-        print(self.ctx.structures_N_dict)
-        print(self.ctx.structures_Np1_dict)
-        print(self.ctx.structures_Nm1_dict)
-
-#         energies_N = self.submit(EnergyWorkchain,
-#                                 code=code,
-#                                 structures=self.ctx.structures_N_dict,
-#                                 settings=settings,
-#                                 pseudo_family=pseudo,
-#                                 options=options)
-
-#         return ToContext(energies_N=energies_N)
+        futures = {}
+        
+        for key, structure in itertools.chain(self.ctx.structures_N_dict.items(),
+                                              self.ctx.structures_Np1_dict.items(),
+                                              self.ctx.structures_Nm1_dict.items()):
+            futures[key] = self.submit(self.ctx.energy_workchain,
+                                       structure=structure,
+                                       **self.ctx.energy_input)
+            
+        return ToContext(**futures)
 
 
     def compute_potentials(self):
-        energies_N = []
-        for i in range(len(self.ctx.energies_N.get_outputs(link_type=LinkType.RETURN))):    
-            energies_N.append(float(self.ctx.energies_N.get_outputs(link_type=LinkType.RETURN)[i]))        
-        energy_N = min(energies_N)
- 
-        energies_Np1 = []
-        for i in range(len(self.ctx.energies_Np1.get_outputs(link_type=LinkType.RETURN))):    
-            energies_Np1.append(float(self.ctx.energies_Np1.get_outputs(link_type=LinkType.RETURN)[i]))        
-        energy_Np1 = min(energies_Np1)
-        
         energies_Nm1 = []
-        for i in range(len(self.ctx.energies_Nm1.get_outputs(link_type=LinkType.RETURN))):    
-            energies_Nm1.append(float(self.ctx.energies_Nm1.get_outputs(link_type=LinkType.RETURN)[i]))        
+        energies_N = []
+        energies_Np1 = []
+        
+        for i in itertools.count(0):
+            key = 'structure_N_%i' % i
+            key_m = 'structure_Nm1_%i' % i
+            key_p = 'structure_Np1_%i' % i
+        
+            if key not in self.ctx or key_m not in self.ctx or key_p not in self.ctx:
+                break
+                
+            energies_Nm1.append([
+                p.get_dict().get('energy') for p in self.ctx[key_m].get_outputs(ParameterData, link_type=LinkType.RETURN) if 'energy' in p.get_dict()
+            ][0])
+            energies_N.append([
+                p.get_dict().get('energy') for p in self.ctx[key].get_outputs(ParameterData, link_type=LinkType.RETURN) if 'energy' in p.get_dict()
+            ][0])
+            energies_Np1.append([
+                p.get_dict().get('energy') for p in self.ctx[key_p].get_outputs(ParameterData, link_type=LinkType.RETURN) if 'energy' in p.get_dict()
+            ][0])
+        
+        energy_N = min(energies_N)
+        energy_Np1 = min(energies_Np1)
         energy_Nm1 = min(energies_Nm1)
 
         # Make sure all energies in eV
         
-        self.ctx.phi_red = -(energy_Np1 - energy_N - float(self.inputs.energy_ref))
-        self.ctx.phi_ox = -(energy_N - energy_Nm1 - float(self.inputs.energy_ref))
+        self.out('phi_red', Float(-(energy_Np1 - energy_N - float(self.inputs.energy_ref))))
+        self.out('phi_ox',  Float(-(energy_N - energy_Nm1 - float(self.inputs.energy_ref))))
 
         
     def set_output(self):
-        for key in self.ctx.structures_N_dict:
-            self.out('structures_N.%s' % key, self.ctx.structures_N_dict[key])
-        for key in self.ctx.structures_Np1_dict:
-            self.out('structures_Np1.%s' % key, self.ctx.structures_Np1_dict[key])
-        for key in self.ctx.structures_Nm1_dict:
-            self.out('structures_Nm1.%s' % key, self.ctx.structures_Nm1_dict[key])
+        pass
+        # for key in self.ctx.structures_N_dict:
+        #     self.out('structures_N.%s' % key, self.ctx.structures_N_dict[key])
+        # for key in self.ctx.structures_Np1_dict:
+        #     self.out('structures_Np1.%s' % key, self.ctx.structures_Np1_dict[key])
+        # for key in self.ctx.structures_Nm1_dict:
+        #     self.out('structures_Nm1.%s' % key, self.ctx.structures_Nm1_dict[key])
         
-#         self.out('phi_red', Float(self.ctx.phi_red))
-#         self.out('phi_ox', Float(self.ctx.phi_ox))
 
 
     def __calculate_factors(self, target_volume, cell_matrix):
