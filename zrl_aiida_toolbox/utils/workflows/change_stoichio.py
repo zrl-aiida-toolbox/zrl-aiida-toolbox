@@ -53,8 +53,7 @@ class ChangeStoichiometryWorkChain(WorkChain):
 
         
     def check_inputs(self):
-        if (abs(self.inputs.delta_N.value) <= self.inputs.error_tol_occ.value) \
-            or (self.inputs.delta_weight_equal.value < 0.0) \
+        if (self.inputs.delta_weight_equal.value < 0.0) \
             or (self.inputs.error_tol_occ.value < 0.0):
             return self.exit_codes.ERROR_INPUT
 

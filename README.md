@@ -63,6 +63,8 @@ Delete the bond between `kind_1` and `kind_2`.
 - [zrl.utils.partial_occ](#zrl-utils-partial_occ)
 - [zrl.utils.shake](#zrl-utils-shake)
 
+- [zrl.stability](#zrl-stability)
+
 - [zrl.fitter](#zrl-fitter-workchain)
 
 ### <a name="zrl-utils-replicate"></a>ReplicateWorkChain (*zrl.utils.replicate*)
@@ -139,6 +141,34 @@ The `parameters` input expects the following parameters:
   vectors. 
   positions. 
 - n `int`:  number of structures to generate.
+
+### <a name="zrl-stability"></a>StableStoichiometryWorkChain (*zrl.stability*)
+
+**Inputs:**
+- structure: `StructureData` (optional)
+- parameters: `ParameterData`
+- partial_occ_parameters: `ParameterData`
+- energy.code: `Code`
+- energy.workchain: `Str`
+- energy.options: `ParameterData`
+- seed: `Int` (optional)
+
+**Outputs:**
+- phi_ox: `Float`
+- phi_red: `Float`
+- seed: `Int`
+
+The `parameters` input expects the following parameters:
+- sampling_method `str`: sampling method for the generation of the structures, currently
+  only `mc` is supported (default: `mc`).
+- stoichiometry_rel_tol `float`: TODO
+- min_volume `float`: minimum bound for the target minimum volume forwarded to the 
+  [replicate workchain](#zrl-utils-replicate).
+- max_volume `float`: maximum bound for the target minimum volume forwarded to the 
+  [replicate workchain](#zrl-utils-replicate).
+- mobile_species `str`: species to calculate the stability against.
+- num_configurations `int`: number of configuration to generate.
+- energy_ref `float`: reference energy.
 
 ### <a name="zrl-fitter-workchain"></a>FitterWorkChain (*zrl.fitter*)
 
