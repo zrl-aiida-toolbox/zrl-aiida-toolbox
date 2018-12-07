@@ -44,6 +44,8 @@ class StableStoichiometryWorkChain(WorkChain):
         spec.input('energy.code', valid_type=Code, required=True)
         spec.input('energy.workchain', valid_type=Str, required=True)
         spec.input('energy.options', valid_type=ParameterData, required=True)
+        
+        spec.input('seed', valid_type=Int)
 
         spec.outline(
             cls.process_inputs,
@@ -76,6 +78,7 @@ class StableStoichiometryWorkChain(WorkChain):
         
         spec.output('phi_red', valid_type=Float)
         spec.output('phi_ox', valid_type=Float)
+        spec.output('seed', valid_type=Int)
 
         spec.exit_code(1, 'ERROR_MISSING_INPUT_STRUCURE', 'Missing input structure or .cif file.')
         spec.exit_code(2, 'ERROR_AMBIGUOUS_INPUT_STRUCURE', 'More than one input structure or .cif file provided.')
@@ -95,6 +98,9 @@ class StableStoichiometryWorkChain(WorkChain):
         
         
     def process_inputs(self):
+        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
+        self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
+        
         parameters_dict = self.inputs.parameters.get_dict()
         if ('cif_file' not in parameters_dict) and ('structure' not in self.inputs):
             return self.exit_codes.ERROR_MISSING_INPUT_STRUCTURE
@@ -213,7 +219,8 @@ class StableStoichiometryWorkChain(WorkChain):
             for i in range(execute_count):            
                 futures['mc.%s.%d' % (key, i)] = self.submit(PartialOccupancyWorkChain,
                                                              structure=StructureData(pymatgen=self.ctx['supercell_%s' % key]),
-                                                             parameters=self.ctx.partial_input)
+                                                             parameters=self.ctx.partial_input,
+                                                             seed=Int(self.ctx.rs.randint(2**31 - 1)))
         return ToContext(**futures)
     
     def parse_MC(self):    
