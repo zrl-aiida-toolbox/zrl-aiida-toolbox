@@ -156,6 +156,19 @@ The `parameters` input expects the following parameters:
 **Outputs:**
 - phi_ox: `Float`
 - phi_red: `Float`
+- seed: `Int`
+
+The `parameters` input expects the following parameters:
+- sampling_method `str`: sampling method for the generation of the structures, currently
+  only `mc` is supported (default: `mc`).
+- stoichiometry_rel_tol `float`: TODO
+- min_volume `float`: minimum bound for the target minimum volume forwarded to the 
+  [replicate workchain](#zrl-utils-replicate).
+- max_volume `float`: maximum bound for the target minimum volume forwarded to the 
+  [replicate workchain](#zrl-utils-replicate).
+- mobile_species `str`: species to calculate the stability against.
+- num_configurations `int`: number of configuration to generate.
+- energy_ref `float`: reference energy.
 
 ### <a name="zrl-fitter-workchain"></a>FitterWorkChain (*zrl.fitter*)
 

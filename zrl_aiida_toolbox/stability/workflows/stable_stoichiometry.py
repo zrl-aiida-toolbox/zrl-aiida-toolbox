@@ -99,6 +99,7 @@ class StableStoichiometryWorkChain(WorkChain):
         
     def process_inputs(self):
         self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
+        self.out('seed', self.ctx.seed)
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
         
         parameters_dict = self.inputs.parameters.get_dict()
