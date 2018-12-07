@@ -31,17 +31,10 @@ class StableStoichiometryWorkChain(WorkChain):
     def define(cls, spec):    
         super(StableStoichiometryWorkChain, cls).define(spec)
         
-        spec.input('input_cif_file_name', valid_type=Str, required=False)
-        spec.input('input_structure_aiida', valid_type=StructureData, required=False)
-        spec.input('mobile_species', valid_type=Str, required=True)
-        spec.input('conf_sampling_method', valid_type=Str, required=True)
-        spec.input('sampling_charges', valid_type=ParameterData, required=True)
-        spec.input('energy_ref', valid_type=Float, required=True)
-        spec.input('num_configurations', valid_type=Int, required=True)
-        spec.input('stoichiometry_rel_tol', valid_type=Float, default=Float(0.05), required=False)
-        spec.input('min_cell_volume', valid_type=Float, default=Float(1000.0), required=False)
-        spec.input('max_cell_volume', valid_type=Float, default=Float(10000.0), required=False)
+        spec.input('structure', valid_type=StructureData, required=False)
         spec.input('verbose', valid_type=Bool, default=Bool(False), required=False)
+        
+        spec.input('parameters', valid_type=ParameterData)
         
         spec.input('partial_occ_parameters', valid_type=ParameterData, 
                    default=ParameterData(dict=dict(selection='last', n_rounds=200, 
@@ -58,7 +51,7 @@ class StableStoichiometryWorkChain(WorkChain):
             # cls.enforce_integer_composition,
             cls.enforce_charge_balance,
             cls.generate_stoichiometries,
-            # cls.process_structures,
+            cls.process_structures,
             if_(cls.sampling_method_is_MC)(
                 while_(cls.parse_MC)(
                     cls.execute_MC
@@ -93,7 +86,7 @@ class StableStoichiometryWorkChain(WorkChain):
                        'The provided energy workchain does not return a ParameterData object')
  
     def sampling_method_is_MC(self):
-        return self.ctx.conf_sampling_method.value == 'sampling_method_MC'
+        return self.ctx.conf_sampling_method == 'mc'
 
     
     def no_sampling_method(self):
@@ -102,38 +95,45 @@ class StableStoichiometryWorkChain(WorkChain):
         
         
     def process_inputs(self):
-        if ('input_cif_file_name' not in self.inputs) and ('input_structure_aiida' not in self.inputs):
+        parameters_dict = self.inputs.parameters.get_dict()
+        if ('cif_file' not in parameters_dict) and ('structure' not in self.inputs):
             return self.exit_codes.ERROR_MISSING_INPUT_STRUCTURE
-        if ('input_cif_file_name' in self.inputs) and ('input_structure_aiida' in self.inputs):
+        if ('cif_file' in parameters_dict) and ('structure' in self.inputs):
             return self.exit_codes.ERROR_AMBIGUOUS_INPUT_STRUCURE
         
-        if ('input_cif_file_name' in self.inputs):
-            self.ctx.structure_input = StructureData(pymatgen=Structure.from_file(str(self.inputs.input_cif_file_name)))
+        if ('cif_file' in parameters_dict):
+            self.ctx.structure = Structure.from_file(parameters_dict.get('cif_file'))
 
-        if ('input_structure_aiida' in self.inputs):
-            self.ctx.structure_input = self.inputs.input_structure_aiida
-        self.ctx.charge_dict = self.inputs.sampling_charges.get_dict()['charges']
-        self.ctx.conf_sampling_method = self.inputs.conf_sampling_method
-        self.ctx.stoichiometry_rel_tol = float(self.inputs.stoichiometry_rel_tol)
-        self.ctx.min_cell_volume = self.inputs.min_cell_volume
-        self.ctx.max_cell_volume = self.inputs.max_cell_volume
-        self.ctx.mobile_species = self.inputs.mobile_species
-        self.ctx.num_configurations = int(self.inputs.num_configurations)
+        if ('structure' in self.inputs):
+            self.ctx.structure = self.inputs.structure.get_pymatgen()
+            
+        self.ctx.charge_dict = parameters_dict.get('charges')
+        
+        self.ctx.conf_sampling_method = parameters_dict.get('sampling_method', 'mc')
+        self.ctx.stoichiometry_rel_tol = float(parameters_dict.get('stoichiometry_rel_tol', 0.05))
+        self.ctx.min_cell_volume = float(parameters_dict.get('min_volume', 1000))
+        self.ctx.max_cell_volume = float(parameters_dict.get('max_volume', 5000))
+        self.ctx.mobile_species = str(parameters_dict.get('mobile_species', ''))
+        self.ctx.num_configurations = int(parameters_dict.get('num_configurations', 1))
+        self.ctx.energy_ref = float(parameters_dict.get('energy_ref'))
+        
+        # TODO : Check all charge are provided against composition.
+        # TODO : Check a valid mobile species is provided.
         
         partial_input_dict = self.inputs.partial_occ_parameters.get_dict()
         partial_input_dict['charges'] = self.ctx.charge_dict
         partial_input_dict.setdefault('return_unique', True)
         self.ctx.partial_input = ParameterData(dict=partial_input_dict)
         
-        self.ctx.energy_workflow = WorkflowFactory(self.inputs.energy.workchain.value)
+        self.ctx.energy_workchain = WorkflowFactory(self.inputs.energy.workchain.value)
         if not any([
             "<class 'aiida.orm.data.parameter.ParameterData'>" == p.get('valid_type')
-            for p in self.ctx.energy_workflow.get_description().get('spec').get('outputs').values()
+            for p in self.ctx.energy_workchain.get_description().get('spec').get('outputs').values()
         ]):
             return self.exit_codes.ERROR_ENERGY_WORKCHAIN_WITHOUT_PARAMETER_OUTPUT
         
         self.ctx.energy_input = {}
-        for name, input_dict in self.ctx.energy_workflow.get_description().get('spec').get('inputs').items():
+        for name, input_dict in self.ctx.energy_workchain.get_description().get('spec').get('inputs').items():
             if name in self.inputs.energy and \
                input_dict.get('valid_type') == str(self.inputs.energy[name].__class__):
                 self.ctx.energy_input[name] = self.inputs.energy[name]
@@ -146,31 +146,32 @@ class StableStoichiometryWorkChain(WorkChain):
         self.ctx.hashes_Np = []
         self.ctx.hashes_Nm = []
         
+        self.ctx.mc_counter = 5
+        
     def generate_supercell(self):
-        structure_py = self.ctx.structure_input.get_pymatgen()
-        input_composition = structure_py.composition.as_dict()
+        input_composition = self.ctx.structure.composition.as_dict()
         replicate_times = 1.0
         for species in input_composition:
             max_error_current = 0.5/input_composition[species]
             replicate_times = max([replicate_times, max_error_current/float(self.ctx.stoichiometry_rel_tol)])
         
-        volume_target = replicate_times * self.ctx.structure_input.get_cell_volume()
-        volume_target = max([self.ctx.min_cell_volume.value, volume_target])
-        volume_target = min([self.ctx.max_cell_volume.value, volume_target])
+        volume_target = replicate_times * self.ctx.structure.volume
+        volume_target = max([self.ctx.min_cell_volume, volume_target])
+        volume_target = min([self.ctx.max_cell_volume, volume_target])
         
         return ToContext(replicated=self.submit(ReplicateWorkChain, 
-                                                structure=self.ctx.structure_input, 
+                                                structure=StructureData(pymatgen=self.ctx.structure), 
                                                 parameters=ParameterData(dict=dict(min_volume=volume_target))))
 
     def enforce_charge_balance(self):
-        self.ctx.supercell = self.ctx.replicated.get_outputs(StructureData, link_type=LinkType.RETURN)[0]
+        self.ctx.supercell = self.ctx.replicated.get_outputs(StructureData, link_type=LinkType.RETURN)[0].get_pymatgen()
         supercell_composition = self.ctx.supercell.composition.as_dict()
         supercell_total_charge = self.__total_charge(supercell_composition, self.ctx.charge_dict)
-        delta_N = - supercell_total_charge / self.ctx.charge_dict[str(self.inputs.mobile_species)]
+        delta_N = - supercell_total_charge / self.ctx.charge_dict[str(self.ctx.mobile_species)]
         
         supercell_balanced = self.submit(ChangeStoichiometryWorkChain, 
-                                         structure=self.ctx.supercell, 
-                                         species=self.inputs.mobile_species, 
+                                         structure=StructureData(pymatgen=self.ctx.supercell), 
+                                         species=Str(self.ctx.mobile_species), 
                                          delta_N=Float(delta_N), 
                                          distribution=Str('aufbau'))
         
@@ -178,17 +179,17 @@ class StableStoichiometryWorkChain(WorkChain):
 
      
     def generate_stoichiometries(self):
-        self.ctx.supercell_N = self.ctx.supercell_balanced.get_outputs(StructureData, link_type=LinkType.RETURN)[0]
+        self.ctx.supercell_N = self.ctx.supercell_balanced.get_outputs(StructureData, link_type=LinkType.RETURN)[0].get_pymatgen()
         
         supercell_Np = self.submit(ChangeStoichiometryWorkChain, 
-                                   structure=self.ctx.supercell_N, 
-                                   species=self.inputs.mobile_species, 
+                                   structure=StructureData(pymatgen=self.ctx.supercell_N), 
+                                   species=Str(self.ctx.mobile_species), 
                                    delta_N=Float(1.0), 
                                    distribution=Str('aufbau'))
         
         supercell_Nm = self.submit(ChangeStoichiometryWorkChain, 
-                                   structure=self.ctx.supercell_N, 
-                                   species=self.inputs.mobile_species, 
+                                   structure=StructureData(pymatgen=self.ctx.supercell_N), 
+                                   species=Str(self.ctx.mobile_species), 
                                    delta_N=Float(-1.0), 
                                    distribution=Str('aufbau'))
         
@@ -197,25 +198,27 @@ class StableStoichiometryWorkChain(WorkChain):
     
     
     def process_structures(self):
-        self.ctx.supercell_Np = self.ctx.supercell_Np.get_outputs_dict().get('structure_changed')
-        self.ctx.supercell_Nm = self.ctx.supercell_Nm.get_outputs_dict().get('structure_changed')
+        self.ctx.supercell_Np = self.ctx.supercell_Np.get_outputs_dict().get('structure_changed').get_pymatgen()
+        self.ctx.supercell_Nm = self.ctx.supercell_Nm.get_outputs_dict().get('structure_changed').get_pymatgen()
        
     def execute_MC(self):
+        self.ctx.mc_counter -= 1
         futures = {}
         
         keys = ('Nm', 'N', 'Np')
         n_conf_target = self.ctx.partial_input.get_dict().get('n_conf_target', 1)
         
         for key in keys:
-            execute_count = np.ceil((self.ctx.num_configurations.value - len(self.ctx['structures_%s' % key])) / n_conf_target)
+            execute_count = np.ceil((self.ctx.num_configurations - len(self.ctx['structures_%s' % key])) / n_conf_target).astype(int)
             for i in range(execute_count):            
                 futures['mc.%s.%d' % (key, i)] = self.submit(PartialOccupancyWorkChain,
-                                                             structure=self.ctx.['supercell_%s' % key],
+                                                             structure=StructureData(pymatgen=self.ctx['supercell_%s' % key]),
                                                              parameters=self.ctx.partial_input)
         return ToContext(**futures)
     
     def parse_MC(self):    
         keys = ('Nm', 'N', 'Np')
+        new = False
         for i in itertools.count():
             if ('mc.N.%d' % i) not in self.ctx and ('mc.Nm.%d' % i) not in self.ctx and ('mc.Np.%d' % i) not in self.ctx:
                 break
@@ -225,34 +228,40 @@ class StableStoichiometryWorkChain(WorkChain):
                     structures = self.ctx['mc.%s.%d' % (key, i)].get_outputs(StructureData, link_type=LinkType.RETURN)
                     del self.ctx['mc.%s.%d' % (key, i)]
                     for structure in structures:
-                        if len(self.ctx['structures_%s' % key]) == self.ctx.num_configurations.value:
+                        if len(self.ctx['structures_%s' % key]) == self.ctx.num_configurations:
                             break
                         if structure.get_hash() not in self.ctx['hashes_%s' % key]:
-                            self.ctx['structures_%s' % key].append(structure)
+                            new = True
+                            self.ctx['structures_%s' % key].append(structure.get_pymatgen())
                             self.ctx['hashes_%s' % key].append(structure.get_hash())
+        
+        if new:
+            self.ctx.mc_counter += 1
+            
         # We continue the loop as long as any category (N, Nm, Np) has fewer than the target number
         # of structure.
-        return any([
-            len(self.ctx['structures_%s' % key]) < self.ctx.num_configurations.value
+        return self.ctx.mc_counter > 0 and any([
+            len(self.ctx['structures_%s' % key]) < self.ctx.num_configurations
             for key in keys
         ])
     
     def check_charges_composition(self):
         keys = (('Nm', -1), ('N', 0), ('Np', 1))
         
-        structure_py_ref = self.ctx.supercell_N.get_pymatgen()
-        composition_ref_N = structure_py_ref.composition.as_dict()
+        composition_ref = self.ctx.supercell_N.composition.element_composition.as_dict()
         
         for key, sign in keys:
             for structure in self.ctx['structures_%s' % key]:
-                composition = structure.get_pymatgen().composition.as_dict()
+                composition = structure.composition.element_composition.as_dict()
                 total_charge = self.__total_charge(composition, self.ctx.charge_dict)
-                if np.abs(total_charge - sign * self.ctx.charge_dict[str(self.inputs.mobile_species)]) > 0.001:
+                if np.abs(total_charge - sign * self.ctx.charge_dict[str(self.ctx.mobile_species)]) > 0.001:
                     self.report('ERROR: Incorrect charge balance.')
                     return self.exit_codes.ERROR_CHARGE_BALANCE
                 
+                composition_ref_ = copy.deepcopy(composition_ref)
+                composition_ref_[self.ctx.mobile_species] += sign
                 for species in composition:
-                    if np.abs(composition[species]/composition_ref[species] - 1.0) > self.ctx.stoichiometry_rel_tol: 
+                    if np.abs(composition[species] / composition_ref_[species] - 1.0) > self.ctx.stoichiometry_rel_tol: 
                         self.report('ERROR: Incorrect composition.')
                         self.report('Composition %s: %s' % (key, composition))
                         self.report('Composition reference %s: %s', (key, composition_ref))
@@ -265,7 +274,7 @@ class StableStoichiometryWorkChain(WorkChain):
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
                 futures['energy.%s.%d' % (key, i)] = self.submit(
                     self.ctx.energy_workchain,
-                    structure=structure,
+                    structure=StructureData(pymatgen=structure),
                     **self.ctx.energy_input
                 )
                 
@@ -283,14 +292,14 @@ class StableStoichiometryWorkChain(WorkChain):
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
                 energy = [
                     p.get_dict().get('energy') 
-                    for p in self.ctx[key_m].get_outputs(ParameterData, link_type=LinkType.RETURN) 
+                    for p in self.ctx['energy.%s.%d' % (key, i)].get_outputs(ParameterData, link_type=LinkType.RETURN) 
                     if 'energy' in p.get_dict()
                 ][0]
                 if energy < energy_min[key]:
                     energy_min[key] = energy
                 
-        self.out('phi_red', Float(-(energy_min['Np'] - energy_min['N'] - float(self.inputs.energy_ref))))
-        self.out('phi_ox',  Float(-(energy_min['N'] - energy_min['Nm'] - float(self.inputs.energy_ref))))
+        self.out('phi_red', Float(-(energy_min['Np'] - energy_min['N'] - float(self.ctx.energy_ref))))
+        self.out('phi_ox',  Float(-(energy_min['N'] - energy_min['Nm'] - float(self.ctx.energy_ref))))
         return
             
     def set_output(self):
