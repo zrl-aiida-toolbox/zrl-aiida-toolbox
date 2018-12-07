@@ -86,6 +86,7 @@ The `parameters` input expects the following parameters:
   for each species. 
 - max_electrons `int`: maximum number of valence electrons requested
 - max_volume `float`: maximum volume requested.
+- min_volume `float`: minimum volume requested.
 
 ### <a name="zrl-utils-partial_occ"></a>PartialOccupancyWorkChain (*zrl.utils.partial_occ*)
 
