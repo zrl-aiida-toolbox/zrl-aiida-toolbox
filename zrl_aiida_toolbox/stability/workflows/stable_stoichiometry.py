@@ -1,8 +1,10 @@
 from aiida.work.workchain import WorkChain, ToContext, if_, while_, return_
 from aiida_quantumespresso.workflows.pw.base import PwBaseWorkChain
-from aiida.orm import Code, LinkType, DataFactory, WorkflowFactory
+from aiida.orm import Code, LinkType, DataFactory, WorkflowFactory, CalculationFactory
 from aiida.work.launch import run
 from aiida.work.run import submit
+
+from aiida_quantumespresso.utils.pseudopotential import validate_and_prepare_pseudos_inputs
 
 from pymatgen.io.cif import CifParser
 from pymatgen.core.structure import Structure
@@ -42,10 +44,14 @@ class StableStoichiometryWorkChain(WorkChain):
         
         spec.input_namespace('energy', dynamic=True)
         spec.input('energy.code', valid_type=Code, required=True)
-        spec.input('energy.workchain', valid_type=Str, required=True)
         spec.input('energy.options', valid_type=ParameterData, required=True)
-        
-        spec.input('seed', valid_type=Int)
+        spec.input_namespace('energy.pseudos', required=False)
+        spec.input('energy.pseudo_family', valid_type=Str, required=False)
+        spec.input('energy.settings', valid_type=ParameterData, required=False)
+        spec.input('energy.kpoints', valid_type=KpointsData)
+        spec.input('energy.parameters', valid_type=ParameterData)
+
+        spec.input('seed', valid_type=Int, required=False)
 
         spec.outline(
             cls.process_inputs,
@@ -132,18 +138,21 @@ class StableStoichiometryWorkChain(WorkChain):
         partial_input_dict.setdefault('return_unique', True)
         self.ctx.partial_input = ParameterData(dict=partial_input_dict)
         
-        self.ctx.energy_workchain = WorkflowFactory(self.inputs.energy.workchain.value)
-        if not any([
-            "<class 'aiida.orm.data.parameter.ParameterData'>" == p.get('valid_type')
-            for p in self.ctx.energy_workchain.get_description().get('spec').get('outputs').values()
-        ]):
-            return self.exit_codes.ERROR_ENERGY_WORKCHAIN_WITHOUT_PARAMETER_OUTPUT
+        # self.ctx.energy_workchain = 
+        # if not any([
+        #     "<class 'aiida.orm.data.parameter.ParameterData'>" == p.get('valid_type')
+        #     for p in self.ctx.energy_workchain.get_description().get('spec').get('outputs').values()
+        # ]):
+        #     return self.exit_codes.ERROR_ENERGY_WORKCHAIN_WITHOUT_PARAMETER_OUTPUT
         
-        self.ctx.energy_input = {}
-        for name, input_dict in self.ctx.energy_workchain.get_description().get('spec').get('inputs').items():
-            if name in self.inputs.energy and \
-               input_dict.get('valid_type') == str(self.inputs.energy[name].__class__):
-                self.ctx.energy_input[name] = self.inputs.energy[name]
+        
+        # spec.input_namespace('energy.pseudos', required=False)
+        # spec.input('energy.pseudo_family', valid_type=Str, required=False)
+        
+        # for name, input_dict in self.ctx.energy_workchain.get_description().get('spec').get('inputs').items():
+        # for name, input_dict in self.ctx.energy_workchain._use_methods.items():
+        #     if name in self.inputs.energy and isinstance(self.inputs.energy[name], input_dict.get('valid_types')):
+        #         self.ctx.energy_input[name] = self.inputs.energy[name]
         
         self.ctx.structures_N = []
         self.ctx.structures_Np = []
@@ -277,13 +286,27 @@ class StableStoichiometryWorkChain(WorkChain):
             
     def run_calc(self):
         keys = ('Nm', 'N', 'Np')
+        process = WorkflowFactory('quantumespresso.pw.base')
+        energy_inputs = {
+            'code': self.inputs.energy.code,
+            'options': self.inputs.energy.options,
+            'settings': self.inputs.energy.settings,
+            'kpoints': self.inputs.energy.kpoints,
+            'parameters': self.inputs.energy.parameters
+        }
+        from aiida_quantumespresso.utils.mapping import prepare_process_inputs
+        
         futures = {}
         for key in keys:
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
+                structure = StructureData(pymatgen=structure)
+                # inputs = prepare_process_inputs(process, self.inputs.energy)
                 futures['energy.%s.%d' % (key, i)] = self.submit(
-                    self.ctx.energy_workchain,
-                    structure=StructureData(pymatgen=structure),
-                    **self.ctx.energy_input
+                    process,
+                    structure=structure,
+                    pseudo_family=self.inputs.energy.get('pseudo_family', None),
+                    max_iterations=Int(1),
+                    **energy_inputs
                 )
                 
         return ToContext(**futures)
@@ -298,9 +321,13 @@ class StableStoichiometryWorkChain(WorkChain):
         
         for key, sign in keys:
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
+                energy_process = self.ctx['energy.%s.%d' % (key, i)]
+                if not energy_process.has_finished_ok():
+                    self.report('process %s has failed.' % energy_process.uuid)
+                    continue
                 energy = [
                     p.get_dict().get('energy') 
-                    for p in self.ctx['energy.%s.%d' % (key, i)].get_outputs(ParameterData, link_type=LinkType.RETURN) 
+                    for p in energy_process.get_outputs(ParameterData, link_type=LinkType.RETURN) 
                     if 'energy' in p.get_dict()
                 ][0]
                 if energy < energy_min[key]:
