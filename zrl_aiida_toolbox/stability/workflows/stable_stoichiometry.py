@@ -9,6 +9,7 @@ from aiida_quantumespresso.utils.pseudopotential import validate_and_prepare_pse
 from pymatgen.io.cif import CifParser
 from pymatgen.core.structure import Structure
 
+from datetime import datetime
 import numpy as np
 import copy, itertools
 
@@ -85,6 +86,11 @@ class StableStoichiometryWorkChain(WorkChain):
         spec.output('phi_red', valid_type=Float)
         spec.output('phi_ox', valid_type=Float)
         spec.output('seed', valid_type=Int)
+        
+        spec.output_namespace('structures', dynamic=True)
+        spec.output('structures.Nm', valid_type=Str)
+        spec.output('structures.N', valid_type=Str)
+        spec.output('structures.Np', valid_type=Str)
 
         spec.exit_code(1, 'ERROR_MISSING_INPUT_STRUCURE', 'Missing input structure or .cif file.')
         spec.exit_code(2, 'ERROR_AMBIGUOUS_INPUT_STRUCURE', 'More than one input structure or .cif file provided.')
@@ -232,7 +238,7 @@ class StableStoichiometryWorkChain(WorkChain):
                                                              parameters=self.ctx.partial_input,
                                                              seed=Int(self.ctx.rs.randint(2**31 - 1)))
         return ToContext(**futures)
-    
+        
     def parse_MC(self):    
         keys = ('Nm', 'N', 'Np')
         new = False
@@ -275,42 +281,63 @@ class StableStoichiometryWorkChain(WorkChain):
                     self.report('ERROR: Incorrect charge balance.')
                     return self.exit_codes.ERROR_CHARGE_BALANCE
                 
+                continue
                 composition_ref_ = copy.deepcopy(composition_ref)
                 composition_ref_[self.ctx.mobile_species] += sign
                 for species in composition:
                     if np.abs(composition[species] / composition_ref_[species] - 1.0) > self.ctx.stoichiometry_rel_tol: 
                         self.report('ERROR: Incorrect composition.')
-                        self.report('Composition %s: %s' % (key, composition))
-                        self.report('Composition reference %s: %s', (key, composition_ref))
+                        self.report('Composition %s: %s - %s' % (species, composition.get(species), composition_ref_.get(species)))
                         return self.exit_codes.ERROR_COMPOSITION
             
     def run_calc(self):
-        keys = ('Nm', 'N', 'Np')
-        process = WorkflowFactory('quantumespresso.pw.base')
+        tot_magnetizations = {'Nm': 1, 'N': 0, 'Np': None}
+        process = WorkflowFactory('quantumespresso.pw.relax')
         energy_inputs = {
             'code': self.inputs.energy.code,
             'options': self.inputs.energy.options,
             'settings': self.inputs.energy.settings,
-            'kpoints': self.inputs.energy.kpoints,
-            'parameters': self.inputs.energy.parameters
+            'kpoints': self.inputs.energy.kpoints
         }
         from aiida_quantumespresso.utils.mapping import prepare_process_inputs
+        from aiida.orm import Group
+        
+        now = datetime.now().strftime("%Y%m%d%H%M%S")
         
         futures = {}
-        for key in keys:
+        for key, tot_magnetization in tot_magnetizations.items():
+            group_name = '%s-%s' % (now, key)
+            self.report(group_name)
+            group, _ = Group.get_or_create(name=group_name)
+            self.out('structures.%s' % key, Str(group_name))
+            
+            parameters = copy.deepcopy(self.inputs.energy.parameters.get_dict())
+            if tot_magnetization is not None:
+                parameters.get('SYSTEM')['tot_magnetization'] = tot_magnetization
+                
+                del parameters.get('SYSTEM')['occupations']
+                del parameters.get('SYSTEM')['smearing']
+                del parameters.get('SYSTEM')['degauss']
+                
+            energy_inputs['parameters'] = ParameterData(dict=parameters)
+            
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
+                self.report(structure)
                 structure = StructureData(pymatgen=structure)
-                # inputs = prepare_process_inputs(process, self.inputs.energy)
+                self.out('structures.%s' % structure.uuid, structure)
+                group.add_nodes(structure)
+                
+                inputs = prepare_process_inputs(process, self.inputs.energy)
                 futures['energy.%s.%d' % (key, i)] = self.submit(
                     process,
                     structure=structure,
                     pseudo_family=self.inputs.energy.get('pseudo_family', None),
                     max_iterations=Int(1),
+                    max_meta_convergence_iterations=Int(1),
                     **energy_inputs
                 )
-                
+        
         return ToContext(**futures)
-
 
     def compute_potentials(self):
         keys = ('Nm', 'N', 'Np')
@@ -319,10 +346,10 @@ class StableStoichiometryWorkChain(WorkChain):
             for key in keys
         }
         
-        for key, sign in keys:
+        for key in keys:
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
                 energy_process = self.ctx['energy.%s.%d' % (key, i)]
-                if not energy_process.has_finished_ok():
+                if not energy_process.is_finished_ok:
                     self.report('process %s has failed.' % energy_process.uuid)
                     continue
                 energy = [

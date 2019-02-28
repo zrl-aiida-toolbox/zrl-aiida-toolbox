@@ -6,7 +6,7 @@ import numpy as np
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.ewald import EwaldSummation
 from pymatgen.core.sites import PeriodicSite, Specie
-from pymatgen.core.structure import Structure
+from pymatgen.core import Structure, Composition
 
 from aiida.orm import DataFactory
 from aiida.work.workchain import WorkChain, while_
@@ -237,8 +237,8 @@ class PartialOccupancyWorkChain(WorkChain):
                                     + self.ctx.configuration_hashes[r + 1:]
                         elif self.ctx.selection == 1:
                             idx = len(self.ctx.configurations) - self.ctx.n_conf_target + 1
-                            self.ctx.configurations = (structure.get_pymatgen(), ) + self.ctx.configurations[idx:]
-                            self.ctx.configuration_hashes = (hash, ) + self.ctx.configuration_hashes[idx:]
+                            self.ctx.configurations = self.ctx.configurations[idx:] + (structure.get_pymatgen(), )
+                            self.ctx.configuration_hashes = self.ctx.configuration_hashes[idx:] + (hash, ) 
 
             if self.inputs.verbose:
                 self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], swaps))
@@ -272,9 +272,21 @@ class PartialOccupancyWorkChain(WorkChain):
         idx = self.ctx.rs.choice(self.ctx.idxes)
         species = self.ctx.select[idx]
         
+        if isinstance(species, dict):
+            # self.report('species was a dict, using Composition.from_dict(species).')
+            species = Composition.from_dict(species)
+        
         new_sites = deepcopy(sites)
 
-        i = self.ctx.rs.randint(len(new_sites[species]))
+        try:
+            i = self.ctx.rs.randint(len(new_sites[species]))
+        except Exception as e:
+            self.report(e)
+            self.report(species)
+            self.report(new_sites)
+            self.report(new_sites[Composition.from_dict(species)])
+            raise Exception()
+        
         isite = sites[species][i]
         ispecie = isite.specie
         
