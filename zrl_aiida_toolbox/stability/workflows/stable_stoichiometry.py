@@ -55,7 +55,7 @@ class StableStoichiometryWorkChain(WorkChain):
         spec.input('seed', valid_type=Int, required=False)
 
         spec.outline(
-            cls.process_inputs,
+            cls.initialize,
             cls.generate_supercell,
             # cls.enforce_integer_composition,
             cls.enforce_charge_balance,
@@ -69,22 +69,18 @@ class StableStoichiometryWorkChain(WorkChain):
                 cls.no_sampling_method,
             ),
             cls.check_charges_composition,
-            cls.run_calc,
-            cls.compute_potentials,
-            # cls.set_output
+            cls.prep_calc,
+            while_(cls.do_calc)(
+                cls.run_calc,
+                cls.check_calc
+            )
+            cls.compute_potentials
         )
 
-        # spec.output('structure_N', valid_type=StructureData)
-        # spec.output('structure_Np1', valid_type=StructureData)
-        # spec.output('structure_Nm1', valid_type=StructureData)
-        # spec.output_namespace('structures_N', valid_type=StructureData, dynamic=True)
-        # spec.output_namespace('structures_Np1', valid_type=StructureData, dynamic=True)
-        # spec.output_namespace('structures_Nm1', valid_type=StructureData, dynamic=True)
-
-        # spec.output_namespace('test', valid_type=Float, dynamic=True)
-        
         spec.output('phi_red', valid_type=Float)
         spec.output('phi_ox', valid_type=Float)
+        spec.output('min_energies_dict', valid_type=ParameterData)
+        
         spec.output('seed', valid_type=Int)
         
         spec.output_namespace('structures', dynamic=True)
@@ -109,7 +105,7 @@ class StableStoichiometryWorkChain(WorkChain):
         return self.exit_codes.ERROR_MISSING_SAMPLING_METHOD
         
         
-    def process_inputs(self):
+    def initialize(self):
         self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
         self.out('seed', self.ctx.seed)
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
@@ -169,6 +165,15 @@ class StableStoichiometryWorkChain(WorkChain):
         self.ctx.hashes_Nm = []
         
         self.ctx.mc_counter = 5
+        
+        self.ctx.structures_to_calc = []       
+        self.ctx.calc_round_params = []
+        self.ctx.calc_round_params.append(dict(tot_magnetizations = {'Nm': None, 'N': None, 'Np': None}, use_smearing = True))
+        self.ctx.calc_round_params.append(dict(tot_magnetizations = {'Nm': 1, 'N': 0, 'Np': 1}, use_smearing = True))
+        self.ctx.calc_round_params.append(dict(tot_magnetizations = {'Nm': 1, 'N': 0, 'Np': 1}, use_smearing = False))
+        self.ctx.calc_round_params.append(dict(tot_magnetizations = {'Nm': None, 'N': None, 'Np': None}, use_smearing = False))
+        self.ctx.calc_round_max = len(self.ctx.calc_round_params)
+        self.ctx.calc_round_index = -1
         
     def generate_supercell(self):
         input_composition = self.ctx.structure.composition.as_dict()
@@ -289,9 +294,34 @@ class StableStoichiometryWorkChain(WorkChain):
                         self.report('ERROR: Incorrect composition.')
                         self.report('Composition %s: %s - %s' % (species, composition.get(species), composition_ref_.get(species)))
                         return self.exit_codes.ERROR_COMPOSITION
-            
+
+    def prep_calc(self):
+        from aiida_quantumespresso.utils.mapping import prepare_process_inputs
+        from aiida.orm import Group
+        
+        now = datetime.now().strftime("%Y%m%d%H%M%S")
+        
+        keys = ('Nm', 'N', 'Np')
+        for key in keys:
+            group_name = '%s-%s' % (now, key)
+            self.report(group_name)
+            group, _ = Group.get_or_create(name=group_name)
+            self.out('structures.%s' % key, Str(group_name))
+            self.ctx.structures_to_calc[key] = []
+            for i, structure in enumerate(self.ctx['structures_%s' % key]):
+                self.report(structure)
+                structure = StructureData(pymatgen=structure)
+                self.out('structures.%s' % structure.uuid, structure)
+                group.add_nodes(structure)
+                self.ctx.structures_to_calc[key].append((i, structure))
+
+    def do_calc(self):
+        self.ctx.calc_round_index += 1
+        return self.ctx.calc_round_index < self.ctx.calc_round_max
+                
     def run_calc(self):
-        tot_magnetizations = {'Nm': 1, 'N': 0, 'Np': None}
+        calc_round_params = self.ctx.calc_round_params[self.ctx.calc_round_index]
+        tot_magnetizations = calc_round_params['tot_magnetizations']
         process = WorkflowFactory('quantumespresso.pw.relax')
         energy_inputs = {
             'code': self.inputs.energy.code,
@@ -299,36 +329,23 @@ class StableStoichiometryWorkChain(WorkChain):
             'settings': self.inputs.energy.settings,
             'kpoints': self.inputs.energy.kpoints
         }
-        from aiida_quantumespresso.utils.mapping import prepare_process_inputs
-        from aiida.orm import Group
-        
-        now = datetime.now().strftime("%Y%m%d%H%M%S")
-        
+       
         futures = {}
         for key, tot_magnetization in tot_magnetizations.items():
-            group_name = '%s-%s' % (now, key)
-            self.report(group_name)
-            group, _ = Group.get_or_create(name=group_name)
-            self.out('structures.%s' % key, Str(group_name))
-            
             parameters = copy.deepcopy(self.inputs.energy.parameters.get_dict())
             if tot_magnetization is not None:
                 parameters.get('SYSTEM')['tot_magnetization'] = tot_magnetization
-                
+            
+            if not calc_round_params['use_smearing']:
                 del parameters.get('SYSTEM')['occupations']
                 del parameters.get('SYSTEM')['smearing']
                 del parameters.get('SYSTEM')['degauss']
                 
             energy_inputs['parameters'] = ParameterData(dict=parameters)
             
-            for i, structure in enumerate(self.ctx['structures_%s' % key]):
-                self.report(structure)
-                structure = StructureData(pymatgen=structure)
-                self.out('structures.%s' % structure.uuid, structure)
-                group.add_nodes(structure)
-                
+            for i, structure in self.ctx.structures_to_calc[key]:
                 inputs = prepare_process_inputs(process, self.inputs.energy)
-                futures['energy.%s.%d' % (key, i)] = self.submit(
+                futures['energy.%s.%d.%d' % (key, i, self.ctx.calc_round_index)] = self.submit(
                     process,
                     structure=structure,
                     pseudo_family=self.inputs.energy.get('pseudo_family', None),
@@ -338,6 +355,19 @@ class StableStoichiometryWorkChain(WorkChain):
                 )
         
         return ToContext(**futures)
+    
+    def check_calc(self):
+        keys = ('Nm', 'N', 'Np')
+        for key in keys:
+            self.ctx.structures_to_calc[key] = []
+            for i, structure in enumerate(self.ctx['structures_%s' % key]):
+                calc_name = 'energy.%s.%d.%d' % (key, i, self.ctx.calc_round_index)
+                if not (calc_name in self.ctx):
+                    continue
+                
+                calc = self.ctx[calc_name]
+                if not calc.is_finished_ok:
+                    self.ctx.structures_to_calc[key].append((i, calc.get_outputs_dict().get('output_structure', calc.get_inputs_dict().get('structure'))))
 
     def compute_potentials(self):
         keys = ('Nm', 'N', 'Np')
@@ -345,28 +375,36 @@ class StableStoichiometryWorkChain(WorkChain):
             key: np.inf
             for key in keys
         }
+        calc_min = {
+            key: {'calc_name': None, 'calc_uuid': None}
+            for key in keys
+        }
         
         for key in keys:
             for i, structure in enumerate(self.ctx['structures_%s' % key]):
-                energy_process = self.ctx['energy.%s.%d' % (key, i)]
-                if not energy_process.is_finished_ok:
-                    self.report('process %s has failed.' % energy_process.uuid)
-                    continue
-                energy = [
-                    p.get_dict().get('energy') 
-                    for p in energy_process.get_outputs(ParameterData, link_type=LinkType.RETURN) 
-                    if 'energy' in p.get_dict()
-                ][0]
-                if energy < energy_min[key]:
-                    energy_min[key] = energy
-                
+                for j in range(self.ctx.calc_round_max):
+                    calc_name = 'energy.%s.%d.%d' % (key, i, j)
+                    if not (calc_name in self.ctx):
+                        continue
+
+                    calc = self.ctx[calc_name]
+                    energy = calc.get_outputs_dict()['output_parameters'].get_dict().get('energy')
+                    if energy is None:
+                        continue
+                    if energy < energy_min[key]:
+                        energy_min[key] = energy
+                        calc_min[key]['calc_name'] = calc_name
+                        calc_min[key]['calc_uuid'] = calc.uuid
+        
+        min_energies_dict = {}
+        for key in keys:
+            min_energies_dict[key] = dict(energy_min=energy_min[key], calc_name=calc_min[key]['calc_name'], calc_uuid=calc_min[key]['calc_uuid'])
+        
+        self.out('min_energies_dict', ParameterData(dict=min_energies_dict))
+        
         self.out('phi_red', Float(-(energy_min['Np'] - energy_min['N'] - float(self.ctx.energy_ref))))
         self.out('phi_ox',  Float(-(energy_min['N'] - energy_min['Nm'] - float(self.ctx.energy_ref))))
-        return
             
-    def set_output(self):
-        pass
-    
     def __total_charge(self, composition, charges):
         total_charge = 0.0
         for species in composition:
