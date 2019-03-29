@@ -73,7 +73,7 @@ class StableStoichiometryWorkChain(WorkChain):
             while_(cls.do_calc)(
                 cls.run_calc,
                 cls.check_calc
-            )
+            ),
             cls.compute_potentials
         )
 
