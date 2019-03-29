@@ -166,7 +166,7 @@ class StableStoichiometryWorkChain(WorkChain):
         
         self.ctx.mc_counter = 5
         
-        self.ctx.structures_to_calc = []       
+        self.ctx.structures_to_calc = {}       
         self.ctx.calc_round_params = []
         self.ctx.calc_round_params.append(dict(tot_magnetizations = {'Nm': None, 'N': None, 'Np': None}, use_smearing = True))
         self.ctx.calc_round_params.append(dict(tot_magnetizations = {'Nm': 1, 'N': 0, 'Np': 1}, use_smearing = True))
