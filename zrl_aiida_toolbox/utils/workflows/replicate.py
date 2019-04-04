@@ -83,6 +83,7 @@ class ReplicateWorkChain(WorkChain):
                                                 as_max=False)
         
         replicas[np.where(replicas == 0)] = 1
+        self.report(replicas)
         self.ctx.a, self.ctx.b, self.ctx.c = replicas
 
     def replicate(self):

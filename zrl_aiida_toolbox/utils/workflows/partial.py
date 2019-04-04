@@ -6,7 +6,7 @@ import numpy as np
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.ewald import EwaldSummation
 from pymatgen.core.sites import PeriodicSite, Specie
-from pymatgen.core import Structure, Composition
+from pymatgen.core import Structure, Composition, Element
 
 from aiida.orm import DataFactory
 from aiida.work.workchain import WorkChain, while_
@@ -31,9 +31,6 @@ class PartialOccupancyWorkChain(WorkChain):
         spec.outline(
             cls.validate_inputs,
             cls.initialize,
-#             while_(cls.do_rounds)(
-#                 cls.round
-#             ),
             cls.round,
             cls.finalize
         )
@@ -51,12 +48,19 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
         
+        self.ctx.structure = self.inputs.structure.get_pymatgen()
+        
         self.ctx.charges = {
-            key: float(value)
-            for key, value in parameter_dict.get('charges', {}).items()
+            el: Element(el).data.get('Common oxidation states')[0]
+            for el in self.ctx.structure.composition.element_composition
         }
         
-        self.ctx.structure = self.inputs.structure.get_pymatgen()
+        self.ctx.charges.update(
+            {
+                key: float(value)
+                for key, value in parameter_dict.get('charges', {}).items()
+            }
+        )
         
         for element in self.ctx.structure.composition:
             composition = self.ctx.structure.composition.get(element)
@@ -195,9 +199,6 @@ class PartialOccupancyWorkChain(WorkChain):
         if self.inputs.verbose:
             self.report('Starting structure: E = %f' % self.ctx.energy[-1])
 
-    def do_rounds(self):
-        return self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0
-    
     def round(self):
         while self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0:
             swaps = 0

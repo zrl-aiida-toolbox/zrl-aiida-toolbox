@@ -296,7 +296,6 @@ class StableStoichiometryWorkChain(WorkChain):
                         return self.exit_codes.ERROR_COMPOSITION
 
     def prep_calc(self):
-        from aiida_quantumespresso.utils.mapping import prepare_process_inputs
         from aiida.orm import Group
         
         now = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -320,6 +319,8 @@ class StableStoichiometryWorkChain(WorkChain):
         return self.ctx.calc_round_index < self.ctx.calc_round_max
                 
     def run_calc(self):
+        from aiida_quantumespresso.utils.mapping import prepare_process_inputs
+        
         calc_round_params = self.ctx.calc_round_params[self.ctx.calc_round_index]
         tot_magnetizations = calc_round_params['tot_magnetizations']
         process = WorkflowFactory('quantumespresso.pw.relax')
@@ -387,7 +388,7 @@ class StableStoichiometryWorkChain(WorkChain):
                     if not (calc_name in self.ctx):
                         continue
 
-                    calc = self.ctx[calc_name]
+                    calc = self.ctx[calc_name].get_outputs(link_type=LinkType.CALL)[0].get_outputs(link_type=LinkType.CALL)[0]
                     energy = calc.get_outputs_dict()['output_parameters'].get_dict().get('energy')
                     if energy is None:
                         continue
