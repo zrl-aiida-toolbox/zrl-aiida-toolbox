@@ -23,6 +23,9 @@ class ShakeWorkChain(WorkChain):
         NORM = 'norm'
         # scale = self.ctx.stdev_atms ** 2
         
+        HALFNORM = 'halfnorm'
+        # scale = self.ctx.stdev_atms ** 2
+        
         EXPON = 'expon'
         # scale = self.ctx.stdev_atms
     
@@ -92,7 +95,9 @@ class ShakeWorkChain(WorkChain):
         if self.ctx.distribution == self.Distribution.MAXWELL:
             return self.ctx.stdev_atms / np.sqrt((3 * np.pi - 8) / np.pi)
         if self.ctx.distribution == self.Distribution.NORM:
-            return self.ctx.stdev_atms ** 2
+            return self.ctx.stdev_atms
+        if self.ctx.distribution == self.Distribution.HALFNORM:
+            return self.ctx.stdev_atms / np.sqrt(1 - 2 / np.pi)
         if self.ctx.distribution == self.Distribution.EXPON:
             return self.ctx.stdev_atms
     

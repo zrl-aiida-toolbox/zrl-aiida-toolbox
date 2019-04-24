@@ -51,7 +51,7 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.structure = self.inputs.structure.get_pymatgen()
         
         self.ctx.charges = {
-            el: Element(el).data.get('Common oxidation states')[0]
+            el.value: el.data.get('Common oxidation states')[0]
             for el in self.ctx.structure.composition.element_composition
         }
         
@@ -103,9 +103,16 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.partial = {}
         self.ctx.select = []
         
+        self.ctx.compositions = []
+        self.ctx.sites_refactored = {}
+        
         # We collect the sites into their composition and calculate the theoretical number of occupied sites
         for site in self.ctx.structure:
             if self.__is_partial(site):
+                self.ctx.sites_refactored.setdefault(site.species_and_occu, [])
+                if site.species_and_occu not in self.ctx.compositions:
+                    self.ctx.compositions.append(site.species_and_occu)
+                
                 self.ctx.partial.setdefault(site.species_and_occu, [[]])
                 self.ctx.partial.get(site.species_and_occu)[0].append(site)
                 
@@ -176,49 +183,65 @@ class PartialOccupancyWorkChain(WorkChain):
                     site = self.ctx.partial.get(comp)[-1].pop(0)
                     self.ctx.partial.get(comp).insert(0, PeriodicSite(Specie(sp, self.ctx.charges.get(sp.value, 0)), 
                                                                       site.coords, site.lattice, True, True))
+                    self.ctx.sites_refactored.get(comp).append(sp)
             leftovers = self.ctx.partial.get(comp).pop()
             
-            self.report((n, type(n)))
             for j in range(len(leftovers)):
                 n -= np.log10(j + 1)
-            self.report((n, type(n)))
             
             for site in leftovers:
                 self.ctx.partial.get(comp).insert(0, PeriodicSite(self.ctx.vacancy, 
                                                                   site.coords, site.lattice, True, True))
+                self.ctx.sites_refactored.get(comp).append(self.ctx.vacancy.element)
 
             for _ in range(np.ceil(n).astype(int)):
                 self.ctx.select.append(comp)
-                                
+        
+        # for sites_refactored in self.ctx.sites_refactored.values():
+        #     self.ctx.rs.shuffle(sites_refactored)
+        
         self.ctx.idxes = [idx for idx in range(len(self.ctx.select))]
         self.ctx.sites = self.ctx.partial
         del self.ctx.partial
         
-        self.ctx.energy = [self.__ewald(self.ctx.sites)]
+        self.ctx.partial_refactored = []
+        # (site #, element) -> particle #
+        self.ctx.indices = {}
+        i = 0
         
+        for site in self.ctx.structure:
+            if self.__is_partial(site):
+                for element in site.species_and_occu.keys():
+                    self.ctx.indices[(i, element)] = len(self.ctx.partial_refactored)
+                    self.ctx.partial_refactored.append(PeriodicSite(Specie(element, self.ctx.charges.get(element.value)), site.coords, site.lattice, True, True))
+                i += 1
+                
+        self.ctx.all_indices = set(range(len(self.ctx.partial_refactored)))
+        structure = Structure.from_sites(self.ctx.partial_refactored)
+        self.ctx.ewald = EwaldSummation(structure)
+
+        self.ctx.energy = [self.__ewald_refactored(self.ctx.sites_refactored)]
+
         if self.inputs.verbose:
             self.report('Starting structure: E = %f' % self.ctx.energy[-1])
 
     def round(self):
         while self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0:
             swaps = 0
-
+                        
             for i in range(self.ctx.pick_conf_every):
-                new_sites = self.ctx.sites
-                for _ in range(1):
-                    new_sites = self.__swap(new_sites)
-
-                energy, swapped = self.__keep(new_sites)
-                swaps += swapped
-
+                new_sites = self.ctx.sites_refactored
+                n_swaps = self.ctx.rs.randint(5)
+                for _ in range(n_swaps):
+                    new_sites = self.__swap_refactored(new_sites)
+                energy, swapped = self.__keep_refactored(new_sites)
+                swaps += n_swaps if swapped else 0
+                
             self.ctx.energy.append(energy)
 
             self.ctx.round += 1
             if self.ctx.round > self.ctx.equilibration:
-                # Implementation of a reservoir sampling selection after the equilibration steps
-                # All structures generated after the equilibration steps have the same probability
-                # of being retured.
-                structure = self.__get_structure()
+                structure = self.__get_structure_refacotred()
                 hash = structure.get_hash()
                 if len(self.ctx.configurations) < self.ctx.n_conf_target:
                     if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
@@ -227,6 +250,9 @@ class PartialOccupancyWorkChain(WorkChain):
                 else:
                     if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
                         if self.ctx.selection == 0:
+                            # Implementation of a reservoir sampling selection after the equilibration steps
+                            # All structures generated after the equilibration steps have the same probability
+                            # of being retured.
                             r = self.ctx.rs.randint(2**31 - 1) % (self.ctx.round - self.ctx.equilibration)
                             keep = r < self.ctx.n_conf_target
                             if keep:
@@ -253,15 +279,6 @@ class PartialOccupancyWorkChain(WorkChain):
             energy.set_array('energy', np.array(self.ctx.energy))
             self.out('energy', energy)
     
-    def __ewald(self, sites):
-        structure = Structure\
-            .from_sites(sum([
-                list(filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value, value))
-                for value in sites.values()
-            ], []))
-
-        return EwaldSummation(structure).total_energy
-    
     def __is_partial(self, site):
         for element in site.species_and_occu:
             if site.species_and_occu.get(element) == 1:
@@ -274,28 +291,16 @@ class PartialOccupancyWorkChain(WorkChain):
         species = self.ctx.select[idx]
         
         if isinstance(species, dict):
-            # self.report('species was a dict, using Composition.from_dict(species).')
             species = Composition.from_dict(species)
         
         new_sites = deepcopy(sites)
 
-        try:
-            i = self.ctx.rs.randint(len(new_sites[species]))
-        except Exception as e:
-            self.report(e)
-            self.report(species)
-            self.report(new_sites)
-            self.report(new_sites[Composition.from_dict(species)])
-            raise Exception()
-        
+        i = self.ctx.rs.randint(len(new_sites[species]))
         isite = sites[species][i]
         ispecie = isite.specie
         
         J = [j for j, site in enumerate(new_sites[species]) if site.specie != ispecie]
 
-        # if len(J) == 0:
-        #     return self.ctx.energy[-1], False
-        
         j = self.ctx.rs.randint(len(J))
         jsite = sites[species][J[j]]
         jspecie = jsite.specie
@@ -305,22 +310,104 @@ class PartialOccupancyWorkChain(WorkChain):
 
         return new_sites
     
+    def __swap_refactored(self, sites):
+        idx = self.ctx.rs.choice(self.ctx.idxes)
+        species = self.ctx.select[idx]
+        
+        if isinstance(species, dict):
+            species = Composition.from_dict(species)
+        
+        new_sites = deepcopy(sites)
+        
+        i = self.ctx.rs.randint(len(new_sites[species]))
+        ielement = sites[species][i]
+        
+        J = [j for j, site in enumerate(new_sites[species]) if site.value != ielement.value]
+        j = self.ctx.rs.randint(len(J))
+        jelement = sites[species][J[j]]
+                
+        new_sites[species][i] = jelement
+        new_sites[species][J[j]] = ielement
+        
+        return new_sites
+    
     def __keep(self, new_sites):
         energy = self.__ewald(new_sites)
 
         exp = np.exp(np.min([500, -(energy - self.ctx.energy[-1]) / (self.__k_b * self.ctx.temperature)]))
         r = self.ctx.rs.rand()
         if exp > r:
-            self.ctx.sites = new_sites
+            self.ctx.sites_ref = new_sites
             return energy, True
         return self.ctx.energy[-1], False
     
+    def __keep_refactored(self, new_sites):
+        energy = self.__ewald_refactored(new_sites)
+        exp = np.exp(np.min([500, -(energy - self.ctx.energy[-1]) / (self.__k_b * self.ctx.temperature)]))
+        r = self.ctx.rs.rand()
+        if exp > r:
+            self.ctx.sites_refactored = new_sites
+            return energy, True
+        return self.ctx.energy[-1], False
+            
+    def __ewald(self, sites):
+        structure = Structure\
+            .from_sites(sum([
+                list(filter(lambda v: v.specie.element.value != self.ctx.vacancy.element.value, value))
+                for value in sites.values()
+            ], []))
+
+        return EwaldSummation(structure).total_energy
+    
+    def __ewald_refactored(self, sites):
+        indices = set(
+            map(
+                lambda item: self.ctx.indices.get(item),
+                filter(
+                    lambda item: item[1] != self.ctx.vacancy.element, 
+                    enumerate(
+                        chain(
+                            *map(
+                                lambda composition: sites.get(composition),
+                                self.ctx.compositions
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        indices = sorted(self.ctx.all_indices - indices)
+        return self.ctx.ewald.compute_partial_energy(indices)
+            
     def __get_structure(self):
         structure = Structure.from_sites(self.ctx.static
                                          + sum([[v
                                                  for v in value
                                                  if v.specie.element.value != self.ctx.vacancy.element.value]
                                                 for value in self.ctx.sites.values()], []))
+        structure.sort()
+        return StructureData(pymatgen=structure)
+    
+    def __get_structure_refacotred(self):
+        indices = list(
+            map(
+                lambda item: self.ctx.indices.get(item),
+                filter(
+                    lambda item: item[1] != self.ctx.vacancy.element, 
+                    enumerate(
+                        chain(
+                            *map(
+                                lambda composition: self.ctx.sites_refactored.get(composition),
+                                self.ctx.compositions
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        
+        structure = Structure.from_sites(self.ctx.static
+                                         + [self.ctx.partial_refactored[i] for i in indices])
         structure.sort()
         return StructureData(pymatgen=structure)
                 

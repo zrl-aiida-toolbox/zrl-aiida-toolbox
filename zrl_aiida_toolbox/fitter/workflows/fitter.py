@@ -5,16 +5,17 @@ from itertools import chain
 from aiida.orm import DataFactory, CalculationFactory, Code, WorkflowFactory, LinkType
 from aiida.work.workchain import WorkChain, while_, ToContext, if_
 
-# PotentialData = DataFactory('zrl.fitter.potential')
+PotentialData = DataFactory('zrl.fitter.potential')
 StructureData = DataFactory('structure')
 ParameterData = DataFactory('parameter')
 ArrayData = DataFactory('array')
 Int = DataFactory('int')
+Float = DataFactory('float')
 Bool = DataFactory('bool')
 String = DataFactory('str')
 KpointsData = DataFactory('array.kpoints')
 
-# FitterCalculation = CalculationFactory('zrl.fitter')
+FitterCalculation = CalculationFactory('zrl.fitter')
 
 
 class FitterWorkChain(WorkChain):
@@ -29,15 +30,14 @@ class FitterWorkChain(WorkChain):
 
         spec.input_namespace('structures', valid_type=StructureData, dynamic=True)
         spec.input_namespace('structures.forces', valid_type=ArrayData, dynamic=True, required=False)
-        spec.input_namespace('structures.energy', valid_type=ParameterData, dynamic=True, required=False)
-        spec.input_namespace('structures.stress', valid_type=ParameterData, dynamic=True, required=False)
+        spec.input_namespace('structures.energy', valid_type=Float, dynamic=True, required=False)
+        # spec.input_namespace('structures.stress', valid_type=ParameterData, dynamic=True, required=False)
 
-        # spec.input_namespace('fitter')
-        # spec.input('fitter.code', valid_type=Code)
-        # spec.input('fitter.parameters', valid_type=ParameterData)
-        # spec.input('fitter.bounds', valid_type=ParameterData)
-        # spec.input('fitter.weights', valid_type=ParameterData)
-        # spec.input('fitter.options', valid_type=ParameterData)
+        spec.input_namespace('fitter')
+        spec.input('fitter.code', valid_type=Code)
+        spec.input('fitter.parameters', valid_type=ParameterData)
+        spec.input('fitter.options', valid_type=ParameterData)
+        spec.input('fitter.force_field', valid_type=ParameterData)
         
         spec.input_namespace('structure', required=False)
         spec.input_namespace('structure.replicate', dynamic=True, required=False)
@@ -66,7 +66,14 @@ class FitterWorkChain(WorkChain):
             if_(cls.do_shake)(
                 cls.execute_shake,
                 cls.handle_shake
-            )
+            ),
+            if_(cls.do_forces)(
+                cls.execute_forces,
+                cls.handle_forces
+            ),
+            cls.fit,
+            cls.process,
+            cls.finalize
         )
 
         # ,
@@ -80,7 +87,7 @@ class FitterWorkChain(WorkChain):
 
     def validate_inputs(self):
         self.ctx.energy = {}
-        self.ctx.stress = {}
+        # self.ctx.stress = {}
         self.ctx.forces = {}
         
         seed = self.inputs.get('seed', np.random.randint(2**16 - 1))
@@ -104,11 +111,11 @@ class FitterWorkChain(WorkChain):
                                if uuid in self.inputs.structures.energy 
                                and uuid in self.ctx.structures}
         
-        if 'stress' in self.inputs.structures:
-            self.ctx.stress = {uuid: self.inputs.structures.stress[uuid]
-                               for uuid in self.ctx.structures
-                               if uuid in self.inputs.structures.stress 
-                               and uuid in self.ctx.structures}
+        # if 'stress' in self.inputs.structures:
+        #     self.ctx.stress = {uuid: self.inputs.structures.stress[uuid]
+        #                        for uuid in self.ctx.structures
+        #                        if uuid in self.inputs.structures.stress 
+        #                        and uuid in self.ctx.structures}
         
         if 'forces' in self.inputs.structures:
             self.ctx.forces = {uuid: self.inputs.structures.forces[uuid]
@@ -117,7 +124,7 @@ class FitterWorkChain(WorkChain):
                                and uuid in self.ctx.structures}    
     
     def do_replicate(self):
-        return len(getattr(self.inputs.structure, 'replicate', {})) > 0
+        return hasattr(self.inputs, 'structure') and len(getattr(self.inputs.structure, 'replicate', {})) > 0
     
     def execute_replicate(self):
         futures = {}
@@ -131,7 +138,7 @@ class FitterWorkChain(WorkChain):
         
         for uuid, structure in chain(self.ctx.structures.items(),
                                      self.ctx.partial_structures.items()):
-            if uuid not in self.ctx.energy or uuid not in self.ctx.stress or uuid not in self.ctx.forces:
+            if uuid not in self.ctx.energy or uuid not in self.ctx.forces:
                 futures[uuid] = self.submit(process, structure=structure, **inputs)
                 
         return ToContext(**futures)
@@ -160,7 +167,7 @@ class FitterWorkChain(WorkChain):
         self.report(self.ctx.structures.keys())
                 
     def do_partial(self):
-        return len(getattr(self.inputs.structure, 'partial', {})) > 0
+        return hasattr(self.inputs, 'structure') and len(getattr(self.inputs.structure, 'partial', {})) > 0
     
     def execute_partial(self):
         futures = {}
@@ -175,7 +182,7 @@ class FitterWorkChain(WorkChain):
         inputs.setdefault('verbose', self.inputs.verbose)
         uuids = list(self.ctx.partial_structures.keys())
         for uuid in uuids:
-            if uuid in self.ctx.energy and uuid in self.ctx.stress and uuid in self.ctx.forces:
+            if uuid in self.ctx.energy and uuid in self.ctx.forces:
                 continue
             inputs_ = copy(inputs)
             inputs_['structure'] = self.ctx.partial_structures.get(uuid)
@@ -196,7 +203,7 @@ class FitterWorkChain(WorkChain):
         self.report(self.ctx.structures.keys())
             
     def do_shake(self):
-        return len(getattr(self.inputs.structure, 'shake', {})) > 0
+        return hasattr(self.inputs, 'structure') and len(getattr(self.inputs.structure, 'shake', {})) > 0
     
     def execute_shake(self):
         futures = {}
@@ -212,7 +219,7 @@ class FitterWorkChain(WorkChain):
         
         uuids = list(self.ctx.structures.keys())
         for uuid in uuids:
-            if uuid in self.ctx.energy and uuid in self.ctx.stress and uuid in self.ctx.forces:
+            if uuid in self.ctx.energy and uuid in self.ctx.forces:
                 continue
             inputs_ = copy(inputs)
             inputs_['structure'] = self.ctx.structures.get(uuid)
@@ -231,34 +238,62 @@ class FitterWorkChain(WorkChain):
                 del self.ctx.structures[uuid]
                 del self.ctx[uuid]
     
-    def converging(self):
-        return np.abs(self.ctx.delta) > 1e-8 and self.ctx.step < self.ctx.max_steps
-
+    def do_forces(self):
+        return len(getattr(self.inputs, 'force', {})) > 0
+    
+    def execute_forces(self):
+        futures = {}
+        process = WorkflowFactory('quantumespresso.pw.relax')
+        
+        inputs = {
+            key: value
+            for key, value in self.inputs.force.items()
+            if key in process.get_description().get('spec').get('inputs').keys()
+        }
+        
+        if not inputs.get('parameters').get_dict().get('CONTROL', {}).get('tprnfor', False):
+            parameters = inputs.get('parameters').get_dict()
+            parameters.setdefault('CONTROL', {})
+            parameters['CONTROL']['tprnfor'] = True
+            inputs['parameters'] = ParameterData(dict=parameters)
+        
+        uuids = list(self.ctx.structures.keys())
+        for uuid in uuids:
+            if uuid in self.ctx.energy and uuid in self.ctx.forces:
+                continue
+            inputs_ = copy(inputs)
+            inputs_['structure'] = self.ctx.structures.get(uuid)
+            futures[uuid] = self.submit(
+                process,
+                max_iterations=Int(1),
+                max_meta_convergence_iterations=Int(1),
+                **inputs_
+            )
+        
+        return ToContext(**futures)
+            
+    def handle_forces(self):
+        uuids = list(self.ctx.structures.keys())
+        for uuid in uuids:
+            if uuid in self.ctx and self.ctx[uuid].is_finished_ok:
+                self.ctx.energy[uuid] = Float(self.ctx[uuid].get_outputs(ParameterData, link_type=LinkType.RETURN)[0].get_dict().get('energy'))
+                self.ctx.forces[uuid] = ArrayData()
+                self.ctx.forces[uuid].set_array('forces', self.ctx[uuid].get_outputs(ArrayData, link_type=LinkType.RETURN)[0].get_array('forces')[-1])
+                del self.ctx[uuid] 
+    
     def fit(self):
         future = self.submit(FitterCalculation,
                              code=self.inputs.fitter.code,
                              structures=self.ctx.structures,
-                             force_field=self.ctx.force_field,
                              forces=self.ctx.forces,
                              energy=self.ctx.energy,
-                             stress=self.ctx.stress,
-                             bounds=self.inputs.fitter.bounds,
                              parameters=self.inputs.fitter.parameters,
-                             weights=self.inputs.fitter.weights,
+                             force_field=self.inputs.fitter.force_field,
                              options=self.inputs.fitter.options.get_dict())
-
         return ToContext(run=future)
-        pass
 
     def process(self):
-        self.ctx.force_field = self.ctx.run.get_outputs(node_type=PotentialData)[0]
-        data = self.ctx.run.get_outputs(node_type=ArrayData)[0]
-
-        self.ctx.delta = data.get_array('costs')[-1] - data.get_array('costs')[-2]
-
-        self.report(self.ctx.delta)
-
-        self.ctx.step += 1
+        self.ctx.force_field = self.ctx.run.get_outputs(PotentialData)[0]
 
     def finalize(self):
         self.out('force_field', self.ctx.force_field)
