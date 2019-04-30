@@ -91,7 +91,7 @@ class FitterCalculation(JobCalculation):
                       output=dict(population='progress.npy', append=False, best='best.yml'),
                       structures=[])
 
-        species = list(inputs.get('force_field').get('species').keys())
+        species = inputs.get('force_field').get('species')
         copy_list = [(tempfolder.get_abs_path('aiida.yml'), '.')]
         
         tempfolder.get_subfolder('./data', create=True)
@@ -109,11 +109,7 @@ class FitterCalculation(JobCalculation):
                 with open(filename, 'wb') as file:
                     data = np.array([
                         (
-                            species.index(
-                                site.specie.value 
-                                if isinstance(site.specie, Element)
-                                else site.specie.element.value
-                            ), 
+                            species.index(str(site.specie)), 
                             0 if isinstance(site.specie, Element)
                             else site.specie.oxi_state, 
                             site.coords[0], 
@@ -136,15 +132,13 @@ class FitterCalculation(JobCalculation):
         
         for formula, count in formulas.items():
             inputs.get('structures').append(dict(
-                format='./data/%s.%%03d.npy' % formula,
+                format=str('./data/%s.%%03d.npy' % formula),
                 range=[0, count]
             ))
         
         with open(tempfolder.get_abs_path('aiida.yml'), 'w') as f:
             f.write(yaml.dump(inputs))
 
-        print tempfolder.get_abs_path('aiida.yml'), os.path.exists(tempfolder.get_abs_path('aiida.yml'))
-        
         calcinfo = CalcInfo()
 
         calcinfo.uuid = self.uuid
@@ -161,6 +155,11 @@ class FitterCalculation(JobCalculation):
 
         calcinfo.codes_info = [codeinfo]
 
+        import os
+
+        for root, dirnames, filenames in os.walk(tempfolder.abspath):
+            print root, dirnames, filenames
+        
         return calcinfo
 
     def __prepare_force_field(self, inputdict):
@@ -168,15 +167,14 @@ class FitterCalculation(JobCalculation):
         
         force_field_dict = {}
         force_field_dict['unit_charge'] = self.__float_or_float_list(parameters.get('unit_charge', 1), 2)
-        force_field_dict['species'] = {}
+        force_field_dict['species'] = []
         
         for key in inputdict:
             if 'structure' in key:
                 for species in inputdict.get(key).get_pymatgen().composition:
-                    el = str(species.value if isinstance(species, Element) else species.element.value)
+                    el = str(species)
                     if el not in force_field_dict.get('species'):
-                        force_field_dict.get('species')[el] = \
-                            parameters.get('charges', {}).get(el, Element(el).data.get('Common oxidation states', [0])[0])
+                        force_field_dict.get('species').append(el)
                 
         for element, shell in parameters.get('shells').items():
             shell_dict = force_field_dict\

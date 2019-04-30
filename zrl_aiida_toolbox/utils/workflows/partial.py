@@ -74,12 +74,9 @@ class PartialOccupancyWorkChain(WorkChain):
         self.ctx.n_conf_target = int(parameter_dict.get('n_conf_target', 1))
         self.ctx.pick_conf_every = int(parameter_dict.get('pick_conf_every', 100))
         self.ctx.equilibration = int(parameter_dict.get('equilibration', 10))
-        self.ctx.n_rounds = int(parameter_dict.get('n_rounds', 
-                                                   self.ctx.equilibration 
-                                                   + self.ctx.n_conf_target 
-                                                   + 10))
+        self.ctx.n_rounds = int(parameter_dict.get('n_rounds', self.ctx.n_conf_target + 10))
         self.ctx.unique = bool(parameter_dict.get('return_unique', False))
-        self.ctx.selection = dict([('reservoir sampling', 0), ('last', 1)])\
+        self.ctx.selection = dict([('reservoir sampling', 0), ('last', 1), ('minimum', 2)])\
             .get(parameter_dict.get('selection', 'reservoir sampling'), 0)
         
         self.ctx.round = 0
@@ -166,6 +163,8 @@ class PartialOccupancyWorkChain(WorkChain):
         
         self.ctx.configurations = tuple()
         self.ctx.configuration_hashes = tuple()
+        self.ctx.configuration_steps = tuple()
+        self.ctx.configuration_energies = tuple()
         
         for comp in partial_counts:
             # For each site, calculate log10 of the multinomial factor,
@@ -247,6 +246,8 @@ class PartialOccupancyWorkChain(WorkChain):
                     if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
                         self.ctx.configurations += (structure.get_pymatgen(), )
                         self.ctx.configuration_hashes += (hash, )
+                        self.ctx.configuration_energies += (energy, )
+                        self.ctx.configuration_steps += (self.ctx.round * self.ctx.pick_conf_every, )
                 else:
                     if not self.ctx.unique or hash not in self.ctx.configuration_hashes:
                         if self.ctx.selection == 0:
@@ -262,21 +263,53 @@ class PartialOccupancyWorkChain(WorkChain):
                                 self.ctx.configuration_hashes = self.ctx.configuration_hashes[:r] \
                                     + (hash, ) \
                                     + self.ctx.configuration_hashes[r + 1:]
+                                self.ctx.configuration_energies = self.ctx.configuration_energies[:r] \
+                                    + (energy, ) \
+                                    + self.ctx.configuration_energies[r + 1:]
+                                self.ctx.configuration_steps = self.ctx.configuration_steps[:r] \
+                                    + (self.ctx.round * self.ctx.pick_conf_every, ) \
+                                    + self.ctx.configuration_steps[r + 1:]
                         elif self.ctx.selection == 1:
+                            # Selection of the last structures
                             idx = len(self.ctx.configurations) - self.ctx.n_conf_target + 1
                             self.ctx.configurations = self.ctx.configurations[idx:] + (structure.get_pymatgen(), )
                             self.ctx.configuration_hashes = self.ctx.configuration_hashes[idx:] + (hash, ) 
-
+                            self.ctx.configuration_energies = self.ctx.configuration_energies[idx:] + (energy, ) 
+                            self.ctx.configuration_steps = self.ctx.configuration_steps[idx:] + (self.ctx.round * self.ctx.pick_conf_every, )
+                        elif self.ctx.selection == 2:
+                            max_energy = np.max(self.ctx.configuration_energies)
+                            if energy < max_energy:
+                                max_i, = np.where(np.array(self.ctx.configuration_energies) == max_energy)
+                                self.ctx.configurations = self.ctx.configurations[:max_i] \
+                                    + (structure.get_pymatgen(), ) \
+                                    + self.ctx.configurations[max_i + 1:]
+                                self.ctx.configuration_hashes = self.ctx.configuration_hashes[:max_i] \
+                                    + (hash, ) \
+                                    + self.ctx.configuration_hashes[max_i + 1:]
+                                self.ctx.configuration_energies = self.ctx.configuration_energies[:max_i] \
+                                    + (energy, ) \
+                                    + self.ctx.configuration_energies[max_i + 1:]
+                                self.ctx.configuration_steps = self.ctx.configuration_steps[:max_i] \
+                                    + (self.ctx.round * self.ctx.pick_conf_every, ) \
+                                    + self.ctx.configuration_steps[max_i + 1:]
+            
             if self.inputs.verbose:
                 self.report('Round %4d: E = %f (%d swaps)' % (self.ctx.round, self.ctx.energy[-1], swaps))
                     
     def finalize(self):
         if 'configurations' in self.ctx:
+            uuids = []
             for structure in self.ctx.configurations:
                 structure = StructureData(pymatgen=structure)
+                uuids.append(structure.uuid)
                 self.out('structures.%s' % structure.uuid, structure) 
+                
             energy = ArrayData()
             energy.set_array('energy', np.array(self.ctx.energy))
+            energy.set_array('uuids', np.array(uuids))
+            energy.set_array('steps', np.array(self.ctx.configuration_steps))
+            energy.set_array('energies', np.array(self.ctx.configuration_energies))
+            
             self.out('energy', energy)
     
     def __is_partial(self, site):

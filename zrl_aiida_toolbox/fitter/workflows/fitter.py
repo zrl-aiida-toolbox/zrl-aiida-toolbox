@@ -14,6 +14,7 @@ Float = DataFactory('float')
 Bool = DataFactory('bool')
 String = DataFactory('str')
 KpointsData = DataFactory('array.kpoints')
+TrajectoryData = DataFactory('array.trajectory')
 
 FitterCalculation = CalculationFactory('zrl.fitter')
 
@@ -276,10 +277,29 @@ class FitterWorkChain(WorkChain):
         uuids = list(self.ctx.structures.keys())
         for uuid in uuids:
             if uuid in self.ctx and self.ctx[uuid].is_finished_ok:
-                self.ctx.energy[uuid] = Float(self.ctx[uuid].get_outputs(ParameterData, link_type=LinkType.RETURN)[0].get_dict().get('energy'))
-                self.ctx.forces[uuid] = ArrayData()
-                self.ctx.forces[uuid].set_array('forces', self.ctx[uuid].get_outputs(ArrayData, link_type=LinkType.RETURN)[0].get_array('forces')[-1])
-                del self.ctx[uuid] 
+                
+                forces = self.ctx[uuid]\
+                    .get_outputs(link_type=LinkType.CALL)[-1]\
+                    .get_outputs(link_type=LinkType.CALL)[-1]\
+                    .get_outputs(TrajectoryData)[-1]\
+                    .get_array('forces')
+                
+                structure = self.ctx[uuid].get_outputs(StructureData)[0]
+                
+                self.ctx.structures[structure.uuid] = structure
+                
+                self.ctx.energy[structure.uuid] = Float(
+                    self.ctx[uuid].get_outputs(ParameterData, link_type=LinkType.RETURN)[0].get_dict().get('energy')
+                )
+                
+                self.ctx.forces[structure.uuid] = ArrayData()
+                self.ctx.forces[structure.uuid].set_array('forces', forces[-1])
+            
+            if uuid in self.ctx.energy and uuid in self.ctx.forces:
+                continue
+                
+            del self.ctx[uuid]
+            del self.ctx.structures[uuid]            
     
     def fit(self):
         future = self.submit(FitterCalculation,

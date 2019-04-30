@@ -319,8 +319,6 @@ class StableStoichiometryWorkChain(WorkChain):
         return self.ctx.calc_round_index < self.ctx.calc_round_max
                 
     def run_calc(self):
-        from aiida_quantumespresso.utils.mapping import prepare_process_inputs
-        
         calc_round_params = self.ctx.calc_round_params[self.ctx.calc_round_index]
         tot_magnetizations = calc_round_params['tot_magnetizations']
         process = WorkflowFactory('quantumespresso.pw.relax')
@@ -345,7 +343,6 @@ class StableStoichiometryWorkChain(WorkChain):
             energy_inputs['parameters'] = ParameterData(dict=parameters)
             
             for i, structure in self.ctx.structures_to_calc[key]:
-                inputs = prepare_process_inputs(process, self.inputs.energy)
                 futures['energy.%s.%d.%d' % (key, i, self.ctx.calc_round_index)] = self.submit(
                     process,
                     structure=structure,
@@ -411,5 +408,4 @@ class StableStoichiometryWorkChain(WorkChain):
         for species in composition:
             total_charge += composition[species]*charges[species]
         return total_charge
-    
     
