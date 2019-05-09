@@ -23,6 +23,7 @@
             "zrl.utils.partial_occ = zrl_aiida_toolbox.utils.workflows.partial:PartialOccupancyWorkChain",
             "zrl.utils.stoichiometry = zrl_aiida_toolbox.utils.workflows.change_stoichio:ChangeStoichiometryWorkChain",
             "zrl.stability = zrl_aiida_toolbox.stability.workflows.stable_stoichiometry:StableStoichiometryWorkChain",
+            "zrl.stability.phase = zrl_aiida_toolbox.stability.workflows.phase_stability:PhaseStabilityWorkChain",
             "zrl.fitter = zrl_aiida_toolbox.fitter.workflows.fitter:FitterWorkChain"
         ]
     }, 

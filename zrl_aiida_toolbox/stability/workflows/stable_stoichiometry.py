@@ -385,8 +385,11 @@ class StableStoichiometryWorkChain(WorkChain):
                     if not (calc_name in self.ctx):
                         continue
 
-                    calc = self.ctx[calc_name].get_outputs(link_type=LinkType.CALL)[0].get_outputs(link_type=LinkType.CALL)[0]
-                    energy = calc.get_outputs_dict()['output_parameters'].get_dict().get('energy')
+                    try:
+                        calc = self.ctx[calc_name].get_outputs(link_type=LinkType.CALL)[0].get_outputs(link_type=LinkType.CALL)[0]
+                        energy = calc.get_outputs_dict()['output_parameters'].get_dict().get('energy')
+                    except:
+                        continue
                     if energy is None:
                         continue
                     if energy < energy_min[key]:

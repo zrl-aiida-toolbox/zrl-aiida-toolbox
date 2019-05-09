@@ -19,6 +19,7 @@ class ShakeWorkChain(WorkChain):
     class Distribution(Enum):
         MAXWELL = 'maxwell'
         # scale = self.ctx.stdev_atms / np.sqrt((3 * np.pi - 8) / np.pi)
+        # scale = self.ctx.stdev_atms * np.sqrt(2 / np.pi) / 2
         
         NORM = 'norm'
         # scale = self.ctx.stdev_atms ** 2
@@ -93,6 +94,7 @@ class ShakeWorkChain(WorkChain):
 
     def scale(self):
         if self.ctx.distribution == self.Distribution.MAXWELL:
+            return self.ctx.stdev_atms * np.sqrt(np.pi / 2) / 2
             return self.ctx.stdev_atms / np.sqrt((3 * np.pi - 8) / np.pi)
         if self.ctx.distribution == self.Distribution.NORM:
             return self.ctx.stdev_atms

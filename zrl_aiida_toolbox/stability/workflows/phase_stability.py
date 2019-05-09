@@ -4,11 +4,13 @@ from aiida.work.launch import run
 from aiida.work.run import submit
 from aiida_quantumespresso.workflows.pw.base import PwBaseWorkChain
 
-from pymatgen.core.structure import Structure
-from pymatgen.analysis.structure_matcher import StructureMatcher
+from aiida_utils.pseudos import get_pseudos
 
+from pymatgen.core.structure import Structure
+from pymatgen.analysis.structure_matcher import StructureMatcher, SpeciesComparator, ElementComparator
+
+from copy import deepcopy
 import numpy as np
-import math
 import itertools
 import re
 import glob
@@ -41,9 +43,11 @@ class PhaseStabilityWorkChain(WorkChain):
         
         spec.input('stoichiometry_rel_tol', valid_type=Float, default=Float(0.05))
         spec.input('min_cell_volume', valid_type=Float, default=Float(1000.0))
-        spec.input('max_cell_volume', valid_type=Float, default=Float(2000.0))
+        spec.input('max_cell_volume', valid_type=Float, default=Float(1500.0))
         
         spec.input('seed', valid_type=Int, required=False)
+        spec.input('mc_temp', valid_type=Float, default=Float(1000.0))
+        spec.input('equilibration', valid_type=Int, default=Int(5000))
         
         spec.input_namespace('energy', dynamic=True)
         spec.input('energy.code', valid_type=Code, required=True)
@@ -61,7 +65,7 @@ class PhaseStabilityWorkChain(WorkChain):
         spec.input('det_thr', valid_type=Float, default=Float(1e-6))
         spec.input('coeff_thr', valid_type=Float, default=Float(1e-6))
         spec.input('energy_supercell_error', valid_type=Float, default=Float(1.0))
-        spec.input('error_tol_potential', valid_type=Float, default=Float(math.inf))
+        spec.input('error_tol_potential', valid_type=Float, required=False)
 
         spec.outline(
             cls.initialize,
@@ -88,10 +92,6 @@ class PhaseStabilityWorkChain(WorkChain):
         
         
     def initialize(self):
-        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
-        self.out('seed', self.ctx.seed)
-        self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
-        
         self.ctx.input_cif_folder = self.inputs.input_cif_folder.value
         self.ctx.element_list = self.inputs.element_list.get_list()
         self.ctx.oxidation_states = self.inputs.oxidation_states.get_dict()
@@ -104,15 +104,22 @@ class PhaseStabilityWorkChain(WorkChain):
         self.ctx.min_cell_volume = self.inputs.min_cell_volume.value
         self.ctx.max_cell_volume = self.inputs.max_cell_volume.value
         
+        self.ctx.seed = self.inputs.seed if 'seed' in self.inputs else Int(np.random.randint(2**31 - 1))
+        self.out('seed', self.ctx.seed)
+        self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
+        
+        self.mc_temp = self.inputs.mc_temp.value
+        self.equilibration = self.inputs.equilibration.value
+        
         self.ctx.process = WorkflowFactory('quantumespresso.pw.relax')
         self.ctx.pseudo_family = self.inputs.energy.get('pseudo_family', None)
         self.ctx.energy_inputs = {
             'code': self.inputs.energy.code,
             'options': self.inputs.energy.options,
             'settings': self.inputs.energy.settings,
-            'kpoints': self.inputs.energy.kpoints,
-            'parameters': self.inputs.energy.parameters
+            'kpoints': self.inputs.energy.kpoints
         }
+        self.ctx.energy_parameters = self.inputs.energy.parameters.get_dict()
         
         self.ctx.mobile_species = self.inputs.mobile_species.value
         self.ctx.main_composition = self.inputs.main_composition.get_dict()
@@ -121,7 +128,7 @@ class PhaseStabilityWorkChain(WorkChain):
         self.ctx.det_thr = self.inputs.det_thr.value
         self.ctx.coeff_thr = self.inputs.coeff_thr.value
         self.ctx.energy_supercell_error = self.inputs.energy_supercell_error.value
-        self.ctx.error_tol_potential = self.inputs.error_tol_potential.value
+        self.ctx.error_tol_potential = self.inputs.error_tol_potential.value if 'error_tol_potential' in self.inputs else None
 
         
     def remove_multiple_cif(self):
@@ -194,8 +201,8 @@ class PhaseStabilityWorkChain(WorkChain):
 
             
     def generate_configurations(self):
-        partial_input_dict = dict(equilibration=5000,
-                                  temperature=1000.0,
+        partial_input_dict = dict(equilibration=self.equilibration,
+                                  temperature=self.mc_temp,
                                   selection='last',
                                   pick_conf_every=1,
                                   n_rounds=1,
@@ -253,15 +260,36 @@ class PhaseStabilityWorkChain(WorkChain):
             self.ctx.structures_used[input_cif_file]['min_key'] = None
 
             
-    def run_calc(self):
+    def run_calc(self):        
         futures = {}
         for input_cif_file in self.ctx.structures_used:
+            structure = self.ctx.structures_used[input_cif_file]['structure_ordered']
+            parameters = deepcopy(self.ctx.energy_parameters)
+            
+            for i, el in enumerate(structure.composition.element_composition):
+                parameters.get('SYSTEM').setdefault('starting_magnetization(%d)' % (i + 1), 0.1)
+            
+            ecutrho = 800.0
+            ecutwfc = 100.0
+            try:
+                cutoff_data = get_pseudos(structure=StructureData(pymatgen=structure), 
+                                      pseudo_family_name=self.ctx.pseudo_family.value,
+                                      return_cutoffs=True)
+                ecutrho = 2 * cutoff_data.get('ecutrho')
+                ecutwfc = 2 * cutoff_data.get('ecutwfc')
+            except:
+                pass
+                
+            parameters.get('SYSTEM').setdefault('ecutrho', ecutrho)
+            parameters.get('SYSTEM').setdefault('ecutwfc', ecutwfc)
+            
             futures['energy.%s' % (input_cif_file)] = self.submit(
                     self.ctx.process,
-                    structure=StructureData(pymatgen=self.ctx.structures_used[input_cif_file]['structure_ordered']),
+                    structure=StructureData(pymatgen=structure),
                     pseudo_family=self.ctx.pseudo_family,
                     max_iterations=Int(1),
                     max_meta_convergence_iterations=Int(1),
+                    parameters=ParameterData(dict=parameters),
                     **self.ctx.energy_inputs
                 )
             
@@ -293,12 +321,12 @@ class PhaseStabilityWorkChain(WorkChain):
         main_comp_key = self.__get_min_energy_key(self.ctx.main_composition, self.ctx.structures_min_energy)
         ref_comp_key = self.__get_min_energy_key(self.ctx.ref_composition, self.ctx.structures_min_energy)
         
-        main_comp_dict = defaultdict(float, structures_dict[main_comp_key]['composition_dict'])
+        main_comp_dict = structures_dict[main_comp_key]['composition_dict']
         main_comp_elements = main_comp_dict.keys()
         num_elements = len(main_comp_elements)
         main_comp_energy = float(structures_dict[main_comp_key]['energy'])
 
-        ref_comp_dict = defaultdict(float, structures_dict[ref_comp_key]['composition_dict'])
+        ref_comp_dict = structures_dict[ref_comp_key]['composition_dict']
         ref_comp_energy = float(structures_dict[ref_comp_key]['energy'])
 
         keys = structures_dict.keys()
@@ -313,26 +341,26 @@ class PhaseStabilityWorkChain(WorkChain):
         potentials_red_mu = []
         potentials_red_sig = []
         
-        potential_ox = math.inf
-        potential_ox_error = 0.0
+        potential_ox = None
+        potential_ox_error = None
         products_ox = None
         products_ox_coeffs = None
         products_ox_files = None
         
-        potential_red = -math.inf
-        potential_red_error = 0.0
+        potential_red = None
+        potential_red_error = None
         products_red = None
         products_red_coeffs = None
         products_red_files = None
         
-        decomp_energy = math.inf
+        decomp_energy = None
         decomp_products = None
         decomp_products_coeffs = None
         decomp_products_files = None
         
         for product_tuple in product_tuples:
             try:
-                product_dicts = [defaultdict(float, structures_dict[product]['composition_dict']) for product in product_tuple]
+                product_dicts = [structures_dict[product]['composition_dict'] for product in product_tuple]
             except KeyError:
                 continue
 
@@ -362,7 +390,7 @@ class PhaseStabilityWorkChain(WorkChain):
                     i += 1
                     decomp_energy_tmp = decomp_energy_tmp + coeffs[i] * structures_dict[product]['energy']
                 decomp_energy_tmp = decomp_energy_tmp + coeffs[num_products] * ref_comp_energy
-                if decomp_energy_tmp < decomp_energy:
+                if decomp_energy_tmp < decomp_energy or decomp_energy is None:
                     decomp_energy = decomp_energy_tmp
                     decomp_products = product_dicts
                     decomp_products_coeffs = coeffs
@@ -389,21 +417,23 @@ class PhaseStabilityWorkChain(WorkChain):
                 if is_ox:
                     potentials_ox_mu.append(potential_eq)
                     potentials_ox_sig.append(potential_eq_error)
-                    if potential_eq < potential_ox and potential_eq_error <= self.ctx.error_tol_potential:
-                        potential_ox = potential_eq
-                        potential_ox_error = potential_eq_error
-                        products_ox = product_dicts
-                        products_ox_coeffs = coeffs
-                        products_ox_files = product_tuple
+                    if potential_eq < potential_ox or potential_ox is None:
+                        if potential_eq_error <= self.ctx.error_tol_potential or self.ctx.error_tol_potential is None:
+                            potential_ox = potential_eq
+                            potential_ox_error = potential_eq_error
+                            products_ox = product_dicts
+                            products_ox_coeffs = coeffs
+                            products_ox_files = product_tuple
                 elif is_red:
                     potentials_red_mu.append(potential_eq)
                     potentials_red_sig.append(potential_eq_error)
-                    if potential_eq > potential_red and potential_eq_error <= self.ctx.error_tol_potential:
-                        potential_red = potential_eq
-                        potential_red_error = potential_eq_error
-                        products_red = product_dicts
-                        products_red_coeffs = coeffs
-                        products_red_files = product_tuple
+                    if potential_eq > potential_red or potential_red is None:
+                        if potential_eq_error <= self.ctx.error_tol_potential or self.ctx.error_tol_potential is None:
+                            potential_red = potential_eq
+                            potential_red_error = potential_eq_error
+                            products_red = product_dicts
+                            products_red_coeffs = coeffs
+                            products_red_files = product_tuple
 
         potentials_all_dict = {}
        
@@ -441,7 +471,7 @@ class PhaseStabilityWorkChain(WorkChain):
 
         
     def __get_min_energy_key(self, composition, structure_dict, eps = 1e-6):
-        min_energy = math.inf
+        min_energy = None
         min_key = None
         for key in structure_dict:
             if 'composition_dict' not in structure_dict[key]:
@@ -474,7 +504,7 @@ class PhaseStabilityWorkChain(WorkChain):
                 continue
             else:
                 energy = scales[0] * structure_dict[key]['energy']
-                if energy < min_energy:
+                if energy < min_energy or min_energy is None:
                     min_energy = energy
                     min_key = key
 
