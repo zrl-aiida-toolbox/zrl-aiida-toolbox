@@ -19,6 +19,7 @@ ParameterData = DataFactory('parameter')
 class FitterCalculation(JobCalculation):
     def _init_internal_params(self):
         super(FitterCalculation, self)._init_internal_params()
+        self._default_parser = 'zrl.fitter'
 
     @classproperty
     def _use_methods(cls):
@@ -88,11 +89,11 @@ class FitterCalculation(JobCalculation):
     def _prepare_for_submission(self, tempfolder, inputdict):
         inputs = dict(parameters=self.__prepare_parameters(inputdict),
                       force_field=self.__prepare_force_field(inputdict),
-                      output=dict(population='progress.npy', append=False, best='best.yml'),
+                      output=dict(population='progress.npy', append=True, best='best.yml'),
                       structures=[])
 
         species = inputs.get('force_field').get('species')
-        copy_list = [(tempfolder.get_abs_path('aiida.yml'), '.')]
+        # copy_list = [(tempfolder.get_abs_path('aiida.yml'), '.')]
         
         tempfolder.get_subfolder('./data', create=True)
         
@@ -125,10 +126,6 @@ class FitterCalculation(JobCalculation):
                     np.save(file, data)
                     np.save(file, inputdict.get('energy_%s' % uuid).value)
 
-                copy_list += [
-                    (str(filename), './data')
-                ]
-
         
         for formula, count in formulas.items():
             inputs.get('structures').append(dict(
@@ -142,7 +139,7 @@ class FitterCalculation(JobCalculation):
         calcinfo = CalcInfo()
 
         calcinfo.uuid = self.uuid
-        calcinfo.local_copy_list = copy_list
+        calcinfo.local_copy_list = []
         calcinfo.retrieve_list = [
             'progress.npy', 'best.yml'
         ]
@@ -213,11 +210,15 @@ class FitterCalculation(JobCalculation):
                     verbosity=parameters.get('verbosity', 10),
                     save_every=parameters.get('save_every', 501),
                     population=parameters.get('population', 100),
-                    max_steps=parameters.get('max_steps', 50000),
-                    core_ftol=parameters.get('core_ftol', 1.e-1),
+                    max_steps=parameters.get('max_steps', 5000),
+                    core_ftol=parameters.get('core_ftol', 5.e-1),
                     weights={
                         function: parameters.get('weights', {}).get(function, 1)
                         for function in ['forces', 'energy', 'f_corr']
+                    },
+                    constraints={
+                        constraint: parameters.get('constraints', {}).get(constraint, 1)
+                        for constraint in ['barrier']
                     })
     
     def __float_or_float_list(self, value, max_length=-1):

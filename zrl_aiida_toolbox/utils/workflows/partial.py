@@ -229,7 +229,8 @@ class PartialOccupancyWorkChain(WorkChain):
     def round(self):
         while self.ctx.round < self.ctx.n_rounds + self.ctx.equilibration and self.ctx.do_break > 0:
             swaps = 0
-                        
+            energy = None
+            
             for i in range(self.ctx.pick_conf_every):
                 new_sites = self.ctx.sites_refactored
                 n_swaps = self.ctx.rs.randint(3)
@@ -237,12 +238,13 @@ class PartialOccupancyWorkChain(WorkChain):
                     new_sites = self.__swap(new_sites)
                 energy, swapped = self.__keep(new_sites)
                 swaps += n_swaps if swapped else 0
-                
-            self.ctx.energy = np.insert(
-                self.ctx.energy,
-                self.ctx.energy.size,
-                energy
-            )
+            
+            if energy:
+                self.ctx.energy = np.insert(
+                    self.ctx.energy,
+                    self.ctx.energy.size,
+                    energy
+                )
 
             self.ctx.round += 1
             if self.ctx.round > self.ctx.equilibration:

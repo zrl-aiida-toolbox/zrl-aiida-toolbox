@@ -313,7 +313,9 @@ class FitterWorkChain(WorkChain):
         return ToContext(run=future)
 
     def process(self):
-        self.ctx.force_field = self.ctx.run.get_outputs(PotentialData)[0]
+        self.ctx.force_field = self.ctx.run.get_outputs(ParameterData, link_type=LinkType.RETURN)[0]
+        self.ctx.costs = self.ctx.run.get_outputs(ArrayData, link_type=LinkType.RETURN)[0]
 
     def finalize(self):
         self.out('force_field', self.ctx.force_field)
+        self.out('costs', self.ctx.force_field)

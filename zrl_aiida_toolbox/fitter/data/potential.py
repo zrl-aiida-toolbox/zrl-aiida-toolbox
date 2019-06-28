@@ -13,11 +13,11 @@ class PotentialData(Data):
             return
         
         self.unit_charge = unit_charge
-        self.charges = charges if isinstances(charges, dict) else {}
+        self.charges = charges if isinstance(charges, dict) else {}
         if isinstance(pairs, (list, tuple)):
             for pair in pairs:
-                self.set_pair(pair.get('kinds')[0], pair.get('kinds')[1 if len(pair.get('kinds')) > 1 else 0],
-                              **dict([(key, value) for key, value in pair.items() if key != 'kinds']))
+                self.set_pair(pair.get('species')[0], pair.get('species')[1 if len(pair.get('species')) > 1 else 0],
+                              **dict([(key, value) for key, value in pair.items() if key != 'species']))
         if isinstance(shells, dict):
             for kind, args in shells.items():
                 self.set_shell(kind, **args)

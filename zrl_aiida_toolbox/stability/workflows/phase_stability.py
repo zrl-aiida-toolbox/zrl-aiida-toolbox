@@ -82,7 +82,10 @@ class PhaseStabilityWorkChain(WorkChain):
         spec.output('seed', valid_type=Int)
         
         spec.output('structures_match_not_used', valid_type=ParameterData)
-        spec.output('structures_used', valid_type=ParameterData)
+        
+        spec.output_namespace('structure', dynamic=True)
+        spec.output_namespace('properties', dynamic=True)
+        
         spec.output('structures_min_energy', valid_type=ParameterData)
         
         spec.output('potentials_all', valid_type=ParameterData)
@@ -108,10 +111,9 @@ class PhaseStabilityWorkChain(WorkChain):
         self.out('seed', self.ctx.seed)
         self.ctx.rs = np.random.RandomState(seed=self.ctx.seed.value)
         
-        self.mc_temp = self.inputs.mc_temp.value
-        self.equilibration = self.inputs.equilibration.value
+        self.ctx.mc_temp = self.inputs.mc_temp.value
+        self.ctx.equilibration = self.inputs.equilibration.value
         
-        self.ctx.process = WorkflowFactory('quantumespresso.pw.relax')
         self.ctx.pseudo_family = self.inputs.energy.get('pseudo_family', None)
         self.ctx.energy_inputs = {
             'code': self.inputs.energy.code,
@@ -129,7 +131,7 @@ class PhaseStabilityWorkChain(WorkChain):
         self.ctx.coeff_thr = self.inputs.coeff_thr.value
         self.ctx.energy_supercell_error = self.inputs.energy_supercell_error.value
         self.ctx.error_tol_potential = self.inputs.error_tol_potential.value if 'error_tol_potential' in self.inputs else None
-
+        
         
     def remove_multiple_cif(self):
         structMatch = StructureMatcher(ltol=0.05,
@@ -143,23 +145,23 @@ class PhaseStabilityWorkChain(WorkChain):
                                    supercell_size='num_sites',
                                    ignored_species=None)
         
-        for input_cif_file_path in glob.glob(self.ctx.input_cif_folder):
-            input_cif_file = os.path.basename(input_cif_file_path)
+        for input_cif_file_path in glob.glob(self.ctx.input_cif_folder + '/*cif'):
+            input_cif_file = os.path.basename(input_cif_file_path).replace('.', '_')
             use_cif = True
             try:
                 structure = Structure.from_file(input_cif_file_path)
             except:
                 print('Structure import from cif not successful.')
                 continue
-
+            
             structure.remove_oxidation_states()
 
             for element in structure.composition.element_composition.elements:
                 if str(element) not in self.ctx.element_list:
                     use_cif = False
 
-            for key in structures_used:
-                if structMatch.fit(structure, structures_used[key]):
+            for key in self.ctx.structures_used:
+                if structMatch.fit(structure, self.ctx.structures_used[key]['structure_original']):
                     use_cif = False
                     self.ctx.structures_match_not_used[input_cif_file] = key
 
@@ -181,7 +183,7 @@ class PhaseStabilityWorkChain(WorkChain):
                 max_error_current = 0.5/input_composition[species]
                 replicate_times = max([replicate_times, max_error_current/self.ctx.stoichiometry_rel_tol])
 
-            volume_target = replicate_times * self.ctx.structure.volume
+            volume_target = replicate_times * structure.volume
             volume_target = max([self.ctx.min_cell_volume, volume_target])
             volume_target = min([self.ctx.max_cell_volume, volume_target])
 
@@ -201,8 +203,8 @@ class PhaseStabilityWorkChain(WorkChain):
 
             
     def generate_configurations(self):
-        partial_input_dict = dict(equilibration=self.equilibration,
-                                  temperature=self.mc_temp,
+        partial_input_dict = dict(equilibration=self.ctx.equilibration,
+                                  temperature=self.ctx.mc_temp,
                                   selection='last',
                                   pick_conf_every=1,
                                   n_rounds=1,
@@ -233,6 +235,8 @@ class PhaseStabilityWorkChain(WorkChain):
             structure_supercell = self.ctx.structures_used[input_cif_file]['structure_supercell']
             structure_supercell.remove_oxidation_states()
             
+            self.ctx.structures_used[input_cif_file]['is_partial'] = not structure_supercell.is_ordered
+            
             if structure_supercell.is_ordered:
                 self.ctx.structures_used[input_cif_file]['structure_ordered'] = structure_supercell
             else:
@@ -260,7 +264,7 @@ class PhaseStabilityWorkChain(WorkChain):
             self.ctx.structures_used[input_cif_file]['min_key'] = None
 
             
-    def run_calc(self):        
+    def run_calc(self):
         futures = {}
         for input_cif_file in self.ctx.structures_used:
             structure = self.ctx.structures_used[input_cif_file]['structure_ordered']
@@ -284,7 +288,7 @@ class PhaseStabilityWorkChain(WorkChain):
             parameters.get('SYSTEM').setdefault('ecutwfc', ecutwfc)
             
             futures['energy.%s' % (input_cif_file)] = self.submit(
-                    self.ctx.process,
+                    WorkflowFactory('quantumespresso.pw.relax'),
                     structure=StructureData(pymatgen=structure),
                     pseudo_family=self.ctx.pseudo_family,
                     max_iterations=Int(1),
@@ -302,18 +306,34 @@ class PhaseStabilityWorkChain(WorkChain):
             if not (calc_name in self.ctx):
                 continue
             
-            calc = self.ctx[calc_name].get_outputs(link_type=LinkType.CALL)[0].get_outputs(link_type=LinkType.CALL)[0]
-            self.ctx.structures_used[input_cif_file]['energy'] = calc.get_outputs_dict()['output_parameters'].get_dict().get('energy')
-        
+            try:
+                calc = self.ctx[calc_name].get_outputs(link_type=LinkType.CALL)[0].get_outputs(link_type=LinkType.CALL)[0]
+                self.ctx.structures_used[input_cif_file]['energy'] = calc.get_outputs_dict()['output_parameters'].get_dict().get('energy')
+            except:
+                continue
+            
+            self.out('structure.%s' % input_cif_file, \
+                     StructureData(pymatgen=self.ctx.structures_used[input_cif_file]['structure_ordered']))
+            
+            properties_dict = {'is_partial': self.ctx.structures_used[input_cif_file]['is_partial'],
+                               'dict_charges': self.ctx.structures_used[input_cif_file]['dict_charges'],
+                               'volume': self.ctx.structures_used[input_cif_file]['volume'],
+                               'composition_dict': self.ctx.structures_used[input_cif_file]['composition_dict'],
+                               'energy': self.ctx.structures_used[input_cif_file]['energy']}
+            
+            self.out('properties.%s' % input_cif_file, ParameterData(dict=properties_dict))
+            
+        structures_min_energy_out = {}
         for input_cif_file in self.ctx.structures_used:
             min_key = self.__get_min_energy_key(self.ctx.structures_used[input_cif_file]['composition_dict'], self.ctx.structures_used)
             self.ctx.structures_used[input_cif_file]['min_key'] = min_key
             if min_key is not None:
                 self.ctx.structures_min_energy[min_key] = self.ctx.structures_used[min_key]
+                structures_min_energy_out[min_key] = {'energy': self.ctx.structures_min_energy[min_key]['energy'],
+                                                      'composition_dict': self.ctx.structures_min_energy[min_key]['composition_dict']}
                 
-        self.out('structures_used', ParameterData(dict=self.ctx.structures_used))
-        self.out('structures_min_energy', ParameterData(dict=self.ctx.structures_min_energy))
-
+        self.out('structures_min_energy', ParameterData(dict=structures_min_energy_out))
+                
                 
     def compute_potentials(self):
         structures_dict = self.ctx.structures_min_energy
@@ -461,10 +481,10 @@ class PhaseStabilityWorkChain(WorkChain):
         decomp_relevant_dict['products_red_coeffs'] = products_red_coeffs
         decomp_relevant_dict['products_red_files'] = products_red_files
         
-        decomp_relevant_dict['phase_decomp_energy'] = decomp_energy
-        decomp_relevant_dict['phase_decomp_products'] = decomp_products
-        decomp_relevant_dict['phase_decomp_products_coeffs'] = decomp_products_coeffs
-        decomp_relevant_dict['phase_decomp_products_files'] = decomp_products_files
+#         decomp_relevant_dict['phase_decomp_energy'] = decomp_energy
+#         decomp_relevant_dict['phase_decomp_products'] = decomp_products
+#         decomp_relevant_dict['phase_decomp_products_coeffs'] = decomp_products_coeffs
+#         decomp_relevant_dict['phase_decomp_products_files'] = decomp_products_files
         
         self.out('potentials_all', ParameterData(dict=potentials_all_dict))
         self.out('decomp_relevant', ParameterData(dict=decomp_relevant_dict))
