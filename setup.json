@@ -6,18 +6,25 @@
         "Programming Language :: Python :: 2.7", 
         "Development Status :: 0 - Alpha"
     ], 
-    "description": "Toolbox for AiiDA developped at the IBM ZRL.",
+    "description": "Toolbox for AiiDA developped at IBM Research - Zurich (ZRL).",
     "entry_points": {
         "aiida.calculations": [
+            "zrl.fitter = zrl_aiida_toolbox.fitter.calculations.fitter:FitterCalculation"
         ],
         "aiida.parsers": [
+            "zrl.fitter = zrl_aiida_toolbox.fitter.parsers.fitter:FitterParser"
         ],
         "aiida.data": [
+            "zrl.fitter.potential = zrl_aiida_toolbox.fitter.data.potential:PotentialData"
         ],
         "aiida.workflows": [
-            "zrl.utils.replicate = aiida_zrl_toolbox.utils.workflows.replicate:ReplicateWorkChain",
-            "zrl.utils.shake = aiida_zrl_toolbox.utils.workflows.shake:ShakeWorkChain",
-            "zrl.utils.partial_occ = aiida_zrl_toolbox.utils.workflows.partial:PartialOccupationWorkChain"
+            "zrl.utils.replicate = zrl_aiida_toolbox.utils.workflows.replicate:ReplicateWorkChain",
+            "zrl.utils.shake = zrl_aiida_toolbox.utils.workflows.shake:ShakeWorkChain",
+            "zrl.utils.partial_occ = zrl_aiida_toolbox.utils.workflows.partial:PartialOccupancyWorkChain",
+            "zrl.utils.stoichiometry = zrl_aiida_toolbox.utils.workflows.change_stoichio:ChangeStoichiometryWorkChain",
+            "zrl.stability = zrl_aiida_toolbox.stability.workflows.stable_stoichiometry:StableStoichiometryWorkChain",
+            "zrl.stability.phase = zrl_aiida_toolbox.stability.workflows.phase_stability:PhaseStabilityWorkChain",
+            "zrl.fitter = zrl_aiida_toolbox.fitter.workflows.fitter:FitterWorkChain"
         ]
     }, 
     "extras_require": {
@@ -28,7 +35,6 @@
         ]
     }, 
     "install_requires": [
-        "aiida_core[atomic_tools]>=0.12.3"
     ], 
     "license": "MIT License", 
     "name": "zrl_aiida_toolbox",
